@@ -1,0 +1,45 @@
+# Multi-stage: `dev` target for local development (hot reload via `next
+# dev`), `prod` target for an actual production build+start. docker-
+# compose.yml defaults to `dev` — see docs/deployment.md for how to
+# build the `prod` target instead.
+
+FROM node:22-slim AS deps
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+
+# --- dev target ---------------------------------------------------------------
+FROM deps AS dev
+WORKDIR /app/frontend
+COPY frontend/ ./
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
+
+# --- build stage for prod ------------------------------------------------------
+FROM deps AS build
+WORKDIR /app/frontend
+COPY frontend/ ./
+# NEXT_PUBLIC_* vars are baked in at build time — pass the real API URL
+# as a build arg when building this target for production.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+RUN npm run build
+
+# --- prod target -----------------------------------------------------------
+FROM node:22-slim AS prod
+WORKDIR /app/frontend
+ENV NODE_ENV=production
+COPY --from=build /app/frontend/package*.json ./
+COPY --from=build /app/frontend/.next ./.next
+COPY --from=build /app/frontend/public ./public
+COPY --from=build /app/frontend/node_modules ./node_modules
+
+RUN groupadd --system app && useradd --system --gid app appuser \
+    && chown -R appuser:app /app
+USER appuser
+
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["npm", "run", "start"]

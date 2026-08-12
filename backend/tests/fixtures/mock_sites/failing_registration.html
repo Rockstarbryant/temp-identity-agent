@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head><title>Sign up</title></head>
+<body>
+  <h1>Sign up</h1>
+  <form id="register-form" action="/mock-sites/failing/submit" method="post">
+    <label for="username">Username</label>
+    <input id="username" type="text" name="username" value="admin" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" required>
+    <button type="submit">Sign up</button>
+  </form>
+  <!-- Server-side, submitting this form always returns an error page —
+       used to test RegistrationFailedError / registration.mark_failed. -->
+</body>
+</html>

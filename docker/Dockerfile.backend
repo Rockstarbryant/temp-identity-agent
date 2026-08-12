@@ -1,0 +1,41 @@
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
+
+WORKDIR /app/backend
+
+# System deps needed by psycopg + Playwright browsers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements/ /app/backend/requirements/
+ARG REQUIREMENTS_FILE=development.txt
+RUN pip install --no-cache-dir -r requirements/${REQUIREMENTS_FILE}
+
+# Playwright browser binaries + OS-level deps. Must run as root (the
+# --with-deps flag installs system packages via apt) — the user switch
+# below happens AFTER this, so the app itself never runs as root even
+# though this build step needs to.
+RUN playwright install --with-deps chromium
+
+COPY backend/ /app/backend/
+
+# Run as a dedicated non-root user. Browser sandboxing inside a container
+# is already reduced (see docs/security.md), so the app process itself
+# should not additionally run as root.
+RUN groupadd --system app && useradd --system --gid app --home /app appuser \
+    && mkdir -p /app/backend/media /app/backend/staticfiles \
+    && chown -R appuser:app /app
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/admin/login/ || exit 1
+
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
