@@ -6,6 +6,7 @@ Subclasses only supply credentials, a label for error messages, and
 (optionally) extra headers / payload fields / retryable status codes.
 """
 import json
+import re
 import uuid
 from typing import Any
 
@@ -18,6 +19,16 @@ from ai.schemas import ChatMessage, CompletionResult, ToolCallRequest, ToolDefin
 DEFAULT_RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
 
+# OpenAI-style APIs only accept tool names matching ^[a-zA-Z0-9_-]{1,64}$.
+# Our registry uses namespaced names like "browser.open_url", so names are
+# encoded on the way out and mapped back on the way in.
+_INVALID_NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def encode_tool_name(name: str) -> str:
+    return _INVALID_NAME_CHARS.sub("_", name.replace(".", "__"))[:64]
+
+
 class OpenAICompatibleProvider(AIProvider):
     label = "Provider"  # used in error messages, e.g. "OpenRouter returned 429: ..."
     timeout = 60.0
@@ -27,6 +38,8 @@ class OpenAICompatibleProvider(AIProvider):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
+        # encoded wire name -> our original tool name, rebuilt on every request
+        self._tool_names: dict[str, str] = {}
 
     # -- hooks ---------------------------------------------------------------
 
@@ -44,9 +57,37 @@ class OpenAICompatibleProvider(AIProvider):
     def _to_provider_request(
         self, messages: list[ChatMessage], tools: list[ToolDefinition]
     ) -> dict[str, Any]:
+        self._tool_names = {}
+
+        def wire_name(name: str) -> str:
+            encoded = encode_tool_name(name)
+            self._tool_names[encoded] = name
+            return encoded
+
+        for t in tools:
+            wire_name(t.name)
+
+        # The prompts refer to tools by their registry names ("browser.open");
+        # show the model the same names it will see in the tool list.
+        renames = sorted(self._tool_names.items(), key=lambda kv: len(kv[1]), reverse=True)
+        rename_re = (
+            re.compile(
+                r"(?<![\w.])(" + "|".join(re.escape(orig) for _, orig in renames) + r")(?!\w)"
+            )
+            if renames
+            else None
+        )
+        to_wire = {orig: enc for enc, orig in renames}
+
+        def rewrite(text: str) -> str:
+            if rename_re is None:
+                return text
+            return rename_re.sub(lambda mo: to_wire[mo.group(1)], text)
+
         provider_messages = []
         for m in messages:
-            entry: dict[str, Any] = {"role": m.role, "content": m.content}
+            content = rewrite(m.content) if m.role in ("system", "user") else m.content
+            entry: dict[str, Any] = {"role": m.role, "content": content}
             if m.role == "tool":
                 entry["tool_call_id"] = m.tool_call_id
             if m.role == "assistant" and m.tool_calls:
@@ -54,7 +95,10 @@ class OpenAICompatibleProvider(AIProvider):
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                        "function": {
+                            "name": wire_name(tc.name),
+                            "arguments": json.dumps(tc.arguments),
+                        },
                     }
                     for tc in m.tool_calls
                 ]
@@ -64,7 +108,7 @@ class OpenAICompatibleProvider(AIProvider):
             {
                 "type": "function",
                 "function": {
-                    "name": t.name,
+                    "name": wire_name(t.name),
                     "description": t.description,
                     "parameters": t.parameters,
                 },
@@ -80,6 +124,12 @@ class OpenAICompatibleProvider(AIProvider):
         }
         payload.update(self._extra_payload())
         return payload
+
+    def _decode_tool_name(self, wire: str) -> str:
+        """Map a name from the API back to our registry name."""
+        if wire in self._tool_names:
+            return self._tool_names[wire]
+        return wire
 
     def _parse_arguments(self, raw: Any) -> dict[str, Any]:
         """Tool-call arguments arrive as a JSON string; free models sometimes mangle it."""
@@ -135,7 +185,7 @@ class OpenAICompatibleProvider(AIProvider):
             tool_calls = [
                 ToolCallRequest(
                     id=tc.get("id") or f"call_{uuid.uuid4().hex[:12]}",
-                    name=tc["function"]["name"],
+                    name=self._decode_tool_name(tc["function"]["name"]),
                     arguments=self._parse_arguments(tc["function"].get("arguments")),
                 )
                 for tc in raw_message["tool_calls"]
