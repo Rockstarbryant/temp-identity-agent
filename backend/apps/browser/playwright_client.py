@@ -18,6 +18,12 @@ from apps.common.exceptions import BrowserError
 from apps.common.url_safety import validate_url
 from apps.registration.models import RegistrationJob
 
+# Playwright's sync API leaves an asyncio event loop running in the worker
+# thread, which makes Django raise SynchronousOnlyOperation for any ORM call
+# made inside a ManagedBrowserSession block. This module only runs in Celery
+# workers (never in async request handling), so allowing it is safe.
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
+
 SCREENSHOT_DIR = Path(getattr(settings, "BASE_DIR", ".")) / "media" / "screenshots"
 
 
