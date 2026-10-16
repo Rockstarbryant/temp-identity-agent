@@ -38,7 +38,7 @@ ARG REQUIREMENTS_FILE=production.txt
 ENV REQUIREMENTS_FILE=${REQUIREMENTS_FILE}
 RUN pip install --no-cache-dir -r requirements/${REQUIREMENTS_FILE}
 
-# Install browser binaries only (deps already installed above)
+# Install browser binaries only (system deps already installed above)
 RUN playwright install chromium
 
 COPY backend/ /app/backend/
@@ -51,6 +51,6 @@ USER appuser
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8000}/health/ || curl -f http://localhost:8000/health/ || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health/ || curl -f https://logindirect.onrender.com/health/ || exit 1
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"
