@@ -1,7 +1,13 @@
 # Multi-stage: `dev` target for local development (hot reload via `next
-# dev`), `prod` target for an actual production build+start. docker-
-# compose.yml defaults to `dev` — see docs/deployment.md for how to
-# build the `prod` target instead.
+# dev`), `prod` target for an actual production build+start.
+#
+# docker-compose.yml (dev) defaults to `target: dev`.
+# docker-compose.prod.yml (and any production deploy) must use `target: prod`
+# and pass the real public API URL as a build-arg:
+#
+#   docker build -f docker/Dockerfile.frontend --target prod \
+#     --build-arg NEXT_PUBLIC_API_URL=https://api.yourdomain.com \
+#     -t temp-identity-agent-frontend:prod ..
 
 FROM node:22-slim AS deps
 WORKDIR /app/frontend

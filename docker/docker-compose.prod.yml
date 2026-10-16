@@ -1,0 +1,103 @@
+# Production-oriented compose.
+#
+# Usage:
+#   1. cp .env.example .env   and fill in real values (see comments inside)
+#   2. Set NEXT_PUBLIC_API_URL to your public API origin (used at frontend build)
+#   3. docker compose -f docker/docker-compose.prod.yml up --build -d
+#
+# Notes:
+# - Postgres / Redis services are included for self-hosted convenience.
+#   If you use Neon + Upstash, comment out the postgres/redis services and
+#   remove the corresponding depends_on blocks; the app will use DATABASE_URL
+#   and REDIS_URL from .env instead.
+# - Frontend is built with target=prod and the real API URL baked in.
+# - Backend runs migrations + collectstatic then gunicorn under production settings.
+# - Put a reverse proxy (Caddy / Nginx / Traefik / cloud LB) in front for TLS.
+
+x-backend-common: &backend-common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.backend
+    args:
+      REQUIREMENTS_FILE: production.txt
+  env_file:
+    - ../.env
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.production
+  volumes:
+    - browser_media:/app/backend/media
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: temp_identity_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Do NOT publish 5432 to the host in production unless you need direct access.
+    # ports:
+    #   - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # ports:
+    #   - "6379:6379"
+
+  backend:
+    <<: *backend-common
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+
+  celery_worker:
+    <<: *backend-common
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: celery -A config worker -l info --concurrency=2
+
+  celery_beat:
+    <<: *backend-common
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: celery -A config beat -l info
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      target: prod
+      args:
+        # IMPORTANT: this value is baked into the Next.js bundle at build time.
+        # Replace with your real public API origin before building.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  browser_media:

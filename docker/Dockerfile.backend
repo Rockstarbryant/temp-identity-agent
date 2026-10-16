@@ -14,20 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements/ /app/backend/requirements/
+
+# Prefer build-arg; fall back to env (Render) then development.txt
 ARG REQUIREMENTS_FILE=development.txt
+ENV REQUIREMENTS_FILE=${REQUIREMENTS_FILE}
 RUN pip install --no-cache-dir -r requirements/${REQUIREMENTS_FILE}
 
-# Playwright browser binaries + OS-level deps. Must run as root (the
-# --with-deps flag installs system packages via apt) — the user switch
-# below happens AFTER this, so the app itself never runs as root even
-# though this build step needs to.
+# Playwright browser binaries + OS-level deps
 RUN playwright install --with-deps chromium
 
 COPY backend/ /app/backend/
 
-# Run as a dedicated non-root user. Browser sandboxing inside a container
-# is already reduced (see docs/security.md), so the app process itself
-# should not additionally run as root.
 RUN groupadd --system app && useradd --system --gid app --home /app appuser \
     && mkdir -p /app/backend/media /app/backend/staticfiles \
     && chown -R appuser:app /app
@@ -35,7 +32,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:8000/admin/login/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health/ || curl -f http://localhost:8000/health/ || exit 1
 
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]

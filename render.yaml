@@ -1,0 +1,189 @@
+# Render Blueprint — Backend (web + worker + beat)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Deploy:
+#   1. Push this repo to GitHub/GitLab
+#   2. Render Dashboard → New → Blueprint → select repo
+#   3. Fill the env groups / secret values when prompted
+#
+# Prerequisites (create these first in their own dashboards):
+#   - Neon Postgres → DATABASE_URL
+#   - Upstash Redis → REDIS_URL (rediss://...)
+#   - Agent Router / OpenRouter key
+#   - Groq API key (https://console.groq.com)
+#   - Fernet key for CREDENTIAL_ENCRYPTION_KEY
+
+services:
+  # ---------------------------------------------------------------------------
+  # Django API (gunicorn)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: tia-backend
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.backend
+    dockerContext: .
+    plan: starter          # upgrade if Playwright concurrency is high
+    healthCheckPath: /health/
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false          # set to your-service.onrender.com
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false          # https://your-app.vercel.app
+      - key: AI_PROVIDER
+        value: fallback
+      - key: AGENT_ROUTER_API_KEY
+        sync: false
+      - key: AGENT_ROUTER_BASE_URL
+        value: https://agentrouter.org/v1
+      - key: AGENT_ROUTER_MODEL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: mailtm
+      - key: EMAIL_API_BASE_URL
+        value: https://api.mail.tm
+      - key: TEMP_ACCOUNT_RETENTION_DAYS
+        value: "7"
+      - key: MAX_CONCURRENT_JOBS
+        value: "3"
+      - key: MAX_JOBS_PER_USER_PER_DAY
+        value: "20"
+      - key: MAX_AGENT_STEPS
+        value: "30"
+      - key: MAX_JOB_DURATION_SECONDS
+        value: "300"
+      - key: REQUIREMENTS_FILE
+        value: production.txt
+    dockerCommand: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+
+  # ---------------------------------------------------------------------------
+  # Celery worker (Playwright lives here — needs more RAM)
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: tia-celery-worker
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.backend
+    dockerContext: .
+    plan: standard         # Playwright needs ≥1 GB; starter is often too tight
+    envVars:
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DJANGO_SETTINGS_MODULE
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DJANGO_SECRET_KEY
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DATABASE_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: REDIS_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: AI_PROVIDER
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: AGENT_ROUTER_API_KEY
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: AGENT_ROUTER_BASE_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: AGENT_ROUTER_MODEL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: GROQ_API_KEY
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: GROQ_BASE_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: GROQ_MODEL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: CREDENTIAL_ENCRYPTION_KEY
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: EMAIL_PROVIDER
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: EMAIL_API_BASE_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: MAX_AGENT_STEPS
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: MAX_JOB_DURATION_SECONDS
+      - key: REQUIREMENTS_FILE
+        value: production.txt
+    dockerCommand: celery -A config worker -l info --concurrency=1
+
+  # ---------------------------------------------------------------------------
+  # Celery beat (periodic cleanup)
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: tia-celery-beat
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.backend
+    dockerContext: .
+    plan: starter
+    envVars:
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DJANGO_SETTINGS_MODULE
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DJANGO_SECRET_KEY
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: DATABASE_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: REDIS_URL
+      - fromService:
+          type: web
+          name: tia-backend
+          envVarKey: CREDENTIAL_ENCRYPTION_KEY
+      - key: REQUIREMENTS_FILE
+        value: production.txt
+    dockerCommand: celery -A config beat -l info

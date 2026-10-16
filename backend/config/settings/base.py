@@ -134,7 +134,7 @@ from datetime import timedelta  # noqa: E402
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=28),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
@@ -145,8 +145,21 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:3000"])
 
 # --- Celery ------------------------------------------------------------------
-CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://localhost:6379/0")
+#CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+#CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://localhost:6379/0")
+REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+
+if REDIS_URL.startswith("rediss://"):
+    CELERY_BROKER_USE_SSL = {
+        "ssl_cert_reqs": "CERT_REQUIRED",
+    }
+
+    CELERY_REDIS_BACKEND_USE_SSL = {
+        "ssl_cert_reqs": "CERT_REQUIRED",
+    }
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -175,10 +188,21 @@ CELERY_BEAT_SCHEDULE = {
 CREDENTIAL_ENCRYPTION_KEY = env("CREDENTIAL_ENCRYPTION_KEY", default=None)
 
 # --- AI provider ---------------------------------------------------------------
-AI_PROVIDER = env("AI_PROVIDER", default="agent_router")
+# Options:
+#   agent_router  – primary OpenAI-compatible proxy (Agent Router / OpenRouter style)
+#   groq          – Groq only
+#   fallback      – try agent_router first; on 429 / 5xx / network error → Groq
+# If left empty and both AGENT_ROUTER_* and GROQ_API_KEY are set, "fallback" is used.
+AI_PROVIDER = env("AI_PROVIDER", default="fallback")
+
 AGENT_ROUTER_API_KEY = env("AGENT_ROUTER_API_KEY", default="")
 AGENT_ROUTER_BASE_URL = env("AGENT_ROUTER_BASE_URL", default="")
 AGENT_ROUTER_MODEL = env("AGENT_ROUTER_MODEL", default="")
+
+# Groq (fallback or primary)
+GROQ_API_KEY = env("GROQ_API_KEY", default="")
+GROQ_BASE_URL = env("GROQ_BASE_URL", default="https://api.groq.com/openai/v1")
+GROQ_MODEL = env("GROQ_MODEL", default="llama-3.3-70b-versatile")
 
 MAX_AGENT_STEPS = env.int("MAX_AGENT_STEPS", default=30)
 MAX_JOB_DURATION_SECONDS = env.int("MAX_JOB_DURATION_SECONDS", default=300)

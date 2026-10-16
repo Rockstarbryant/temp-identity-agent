@@ -1,0 +1,27 @@
+# Example Caddy reverse-proxy configuration.
+# Point DNS for both hostnames at this machine, then:
+#   caddy run --config docker/Caddyfile.example
+#
+# Caddy automatically obtains and renews Let's Encrypt certificates.
+
+api.yourdomain.com {
+    reverse_proxy localhost:8000
+    encode gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+
+app.yourdomain.com {
+    reverse_proxy localhost:3000
+    encode gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
