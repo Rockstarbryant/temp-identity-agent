@@ -6,6 +6,7 @@ variables (see .env.example at the project root). Nothing sensitive
 is hard-coded here.
 """
 from pathlib import Path
+import ssl
 
 import environ
 
@@ -145,26 +146,26 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:3000"])
 
 # --- Celery ------------------------------------------------------------------
-#CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
-#CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://localhost:6379/0")
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 
+# Upstash / rediss:// — must use ssl module constants, NOT the string "CERT_REQUIRED"
 if REDIS_URL.startswith("rediss://"):
     CELERY_BROKER_USE_SSL = {
-        "ssl_cert_reqs": "CERT_REQUIRED",
+        "ssl_cert_reqs": ssl.CERT_REQUIRED,
+    }
+    CELERY_REDIS_BACKEND_USE_SSL = {
+        "ssl_cert_reqs": ssl.CERT_REQUIRED,
     }
 
-    CELERY_REDIS_BACKEND_USE_SSL = {
-        "ssl_cert_reqs": "CERT_REQUIRED",
-    }
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = env.int("MAX_JOB_DURATION_SECONDS", default=300)
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # --- Celery beat schedule (periodic cleanup) ----------------------------------
 CELERY_BEAT_SCHEDULE = {
