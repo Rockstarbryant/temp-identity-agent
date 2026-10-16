@@ -6,22 +6,40 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/backend
 
-# System deps needed by psycopg + Playwright browsers
+# System deps: Postgres client + Chromium runtime libs (Debian Trixie compatible)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    fonts-liberation \
+    fonts-unifont \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements/ /app/backend/requirements/
 
-# Prefer build-arg; fall back to env (Render) then development.txt
-ARG REQUIREMENTS_FILE=development.txt
+# Default to production on Render; override with build-arg if needed
+ARG REQUIREMENTS_FILE=production.txt
 ENV REQUIREMENTS_FILE=${REQUIREMENTS_FILE}
 RUN pip install --no-cache-dir -r requirements/${REQUIREMENTS_FILE}
 
-# Playwright browser binaries + OS-level deps
-RUN playwright install --with-deps chromium
+# Install browser binaries only (deps already installed above)
+RUN playwright install chromium
 
 COPY backend/ /app/backend/
 
