@@ -219,17 +219,199 @@ class TestAgentLoop:
         assert registration_job.state == "failed"
 
 
-# --- Agent Router provider ------------------------------------------------------
+# --- OpenRouter / Groq providers + fallback -------------------------------------
 
-class TestAgentRouterProvider:
+def _ok_body(model="meta/free-model:free", tool_args='{"url": "https://example.com"}'):
+    return {
+        "model": model,
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "browser.open_url", "arguments": tool_args},
+                        }
+                    ],
+                },
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+    }
+
+
+def _complete(provider, responses):
+    """Run provider.complete() with httpx.Client.post returning `responses` in order."""
+    import httpx
+
+    built = [
+        httpx.Response(status, json=body) if isinstance(body, dict) else body
+        for status, body in responses
+    ]
+    with patch("httpx.Client") as MockClient:
+        instance = MockClient.return_value.__enter__.return_value
+        instance.post.side_effect = built
+        result = provider.complete([ChatMessage(role="user", content="hi")], build_tool_definitions())
+        return result, instance.post.call_args_list
+
+
+class TestOpenRouterProvider:
+    def test_defaults_to_openrouter_free_model(self, settings):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        settings.OPENROUTER_MODEL = ""
+        assert OpenRouterProvider().model == "openrouter/free"
+
+    def test_requires_api_key(self, settings):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        settings.OPENROUTER_API_KEY = ""
+        with pytest.raises(AIProviderError):
+            OpenRouterProvider()
+
+    def test_parses_tool_call_and_reports_served_model(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        result, calls = _complete(OpenRouterProvider(), [(200, _ok_body())])
+        assert result.provider == "openrouter"
+        assert result.model == "meta/free-model:free"
+        assert result.message.tool_calls[0].arguments == {"url": "https://example.com"}
+        assert (result.input_tokens, result.output_tokens) == (11, 7)
+        sent = calls[0].kwargs["json"]
+        assert sent["model"] == "openrouter/free"
+        assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
+
+    def test_empty_tool_arguments_become_empty_dict(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        result, _ = _complete(OpenRouterProvider(), [(200, _ok_body(tool_args=""))])
+        assert result.message.tool_calls[0].arguments == {}
+
     def test_malformed_response_raises_cleanly(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        with pytest.raises(AIProviderError):
+            _complete(OpenRouterProvider(), [(200, {"unexpected": "shape"})])
+
+    @pytest.mark.parametrize("status,retryable", [(429, True), (503, True), (402, True), (401, False), (400, False)])
+    def test_http_status_retryable_flag(self, status, retryable):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        with pytest.raises(AIProviderError) as exc:
+            _complete(OpenRouterProvider(), [(status, {"error": {"message": "nope"}})])
+        assert exc.value.status_code == status
+        assert exc.value.retryable is retryable
+
+    def test_error_inside_200_body_uses_embedded_code(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        body = {"error": {"code": 429, "message": "rate limited upstream"}}
+        with pytest.raises(AIProviderError) as exc:
+            _complete(OpenRouterProvider(), [(200, body)])
+        assert exc.value.status_code == 429 and exc.value.retryable
+
+    def test_malformed_tool_arguments_are_retryable(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        with pytest.raises(AIProviderError) as exc:
+            _complete(OpenRouterProvider(), [(200, _ok_body(tool_args="{not json"))])
+        assert exc.value.retryable
+
+
+class TestFallbackProvider:
+    def test_uses_openrouter_when_it_succeeds(self):
+        from ai.providers.fallback import FallbackAIProvider
+
+        provider = FallbackAIProvider()
+        result, calls = _complete(provider, [(200, _ok_body())])
+        assert len(calls) == 1
+        assert result.provider == "openrouter"
+        assert provider.name == "openrouter"
+
+    def test_rate_limited_openrouter_falls_back_to_groq(self):
+        from ai.providers.fallback import FallbackAIProvider
+
+        provider = FallbackAIProvider()
+        result, calls = _complete(
+            provider,
+            [(429, {"error": {"message": "free-models-per-min"}}), (200, _ok_body(model="llama-groq"))],
+        )
+        assert len(calls) == 2
+        assert result.provider == "groq"
+        assert provider.name == "groq" and provider.model == "test-groq-model"
+        assert calls[1].kwargs["json"]["model"] == "test-groq-model"
+        assert calls[1].kwargs["headers"]["Authorization"] == "Bearer test-groq-key"
+
+    def test_next_call_tries_openrouter_again(self):
+        from ai.providers.fallback import FallbackAIProvider
+
+        provider = FallbackAIProvider()
+        _, calls = _complete(
+            provider,
+            [(429, {"error": {"message": "x"}}), (200, _ok_body()), (200, _ok_body())],
+        )
+        result, _ = _complete(provider, [(200, _ok_body())])
+        assert result.provider == "openrouter"
+
+    def test_non_retryable_error_does_not_fall_back(self):
+        from ai.providers.fallback import FallbackAIProvider
+
+        with pytest.raises(AIProviderError) as exc:
+            _complete(FallbackAIProvider(), [(401, {"error": {"message": "bad key"}})])
+        assert exc.value.status_code == 401
+
+    def test_both_failing_reports_both_errors(self):
+        from ai.providers.fallback import FallbackAIProvider
+
+        with pytest.raises(AIProviderError) as exc:
+            _complete(
+                FallbackAIProvider(),
+                [(429, {"error": {"message": "a"}}), (503, {"error": {"message": "b"}})],
+            )
+        assert "openrouter" in str(exc.value) and "groq" in str(exc.value)
+
+    def test_network_error_falls_back(self):
         import httpx
 
-        from ai.providers.agent_router import AgentRouterProvider
+        from ai.providers.fallback import FallbackAIProvider
 
-        provider = AgentRouterProvider()
+        provider = FallbackAIProvider()
         with patch("httpx.Client") as MockClient:
             instance = MockClient.return_value.__enter__.return_value
-            instance.post.return_value = httpx.Response(200, json={"unexpected": "shape"})
-            with pytest.raises(AIProviderError):
-                provider.complete([ChatMessage(role="user", content="hi")], build_tool_definitions())
+            instance.post.side_effect = [httpx.ConnectTimeout("timed out"), httpx.Response(200, json=_ok_body())]
+            result = provider.complete([ChatMessage(role="user", content="hi")], build_tool_definitions())
+        assert result.provider == "groq"
+
+    def test_without_openrouter_key_uses_groq_directly(self, settings):
+        from ai.providers.fallback import FallbackAIProvider
+
+        settings.OPENROUTER_API_KEY = ""
+        result, calls = _complete(FallbackAIProvider(), [(200, _ok_body())])
+        assert len(calls) == 1 and result.provider == "groq"
+
+
+class TestProviderRouter:
+    def test_factory_names(self):
+        from ai.providers.fallback import FallbackAIProvider
+        from ai.providers.groq import GroqProvider
+        from ai.providers.openrouter import OpenRouterProvider
+        from ai.router import get_ai_provider
+
+        assert isinstance(get_ai_provider("openrouter"), OpenRouterProvider)
+        assert isinstance(get_ai_provider("groq"), GroqProvider)
+        assert isinstance(get_ai_provider("fallback"), FallbackAIProvider)
+
+    def test_legacy_agent_router_value_maps_to_fallback(self):
+        from ai.providers.fallback import FallbackAIProvider
+        from ai.router import get_ai_provider
+
+        assert isinstance(get_ai_provider("agent_router"), FallbackAIProvider)
+
+    def test_unknown_provider_rejected(self):
+        from ai.router import UnknownAIProviderError, get_ai_provider
+
+        with pytest.raises(UnknownAIProviderError):
+            get_ai_provider("nope")

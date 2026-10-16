@@ -45,11 +45,11 @@ half (what happens even if the model is fooled).
 
 ## Known limitations (disclosed, not hidden)
 
-- **Agent Router's exact API shape is unverified.** No fetchable spec
-  was available; the provider implementation assumes the standard
-  OpenAI-compatible `/chat/completions` tool-calling shape. If your
-  instance differs, everything provider-specific lives in
-  `ai/providers/agent_router.py`.
+- **LLM providers are verified against mocked HTTP only.** OpenRouter and
+  Groq are exercised via mocked `/chat/completions` responses in tests, not
+  live calls. `openrouter/free` routes to whichever free model is available,
+  so model behaviour (and which third party sees the page content sent to
+  the agent) can vary between calls.
 - **mail.tm and Playwright integrations are verified against
   documented schemas / jsdom-simulated DOM, not live network calls or
   a real browser** — this sandbox's network/tooling couldn't reach

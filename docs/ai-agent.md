@@ -4,18 +4,28 @@
 
 `ai/base.py` defines `AIProvider` — one method, `complete(messages,
 tools) -> CompletionResult`, in provider-agnostic form
-(`ai/schemas.py`). `ai/providers/agent_router.py` is the only concrete
-implementation right now; `ai/router.py` picks it based on
-`settings.AI_PROVIDER`. Adding `OpenAIProvider`/`AnthropicProvider`/
+(`ai/schemas.py`). Concrete providers live in `ai/providers/`:
+
+- `openrouter.py` — primary, model `openrouter/free` (OpenRouter's free-models
+  router picks an available free model per request)
+- `groq.py` — fallback, `llama-3.3-70b-versatile` by default
+- `fallback.py` — tries OpenRouter, and on a retryable failure (429, 402, 404,
+  5xx, timeout/network error, malformed model output) retries the same request
+  on Groq. Auth/bad-request errors (401/400) are *not* masked by the fallback.
+- `openai_compat.py` — shared OpenAI-style `/chat/completions` code that
+  OpenRouter and Groq both build on
+
+`ai/router.py` picks one based on `settings.AI_PROVIDER`
+(`fallback` | `openrouter` | `groq`). Each `CompletionResult` records which
+provider and concrete model answered, and the job's `AgentSession` row is
+updated accordingly. Adding `OpenAIProvider`/`AnthropicProvider`/
 `GoogleProvider` later means adding a new file in `ai/providers/` and
 registering it in `ai/router.py` — nothing else in the codebase
 imports a provider directly.
 
-**Agent Router's exact wire format is unverified** — see
-`docs/security.md`'s known limitations. The implementation assumes
-OpenAI-compatible `/chat/completions` tool calling; adjust
-`_to_provider_request`/`_from_provider_response` in
-`ai/providers/agent_router.py` if your instance differs.
+**Free-tier caveat:** `openrouter/free` models are rate-limited (and daily-capped
+unless the account has credits), and not every free model is equally good at tool
+calling. The Groq fallback exists for exactly that; set `GROQ_API_KEY` too.
 
 ## Tool registry
 

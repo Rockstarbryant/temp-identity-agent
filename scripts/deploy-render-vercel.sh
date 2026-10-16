@@ -9,7 +9,7 @@
 #   - Render CLI   :  https://render.com/docs/cli   (optional but convenient)
 #   - Vercel CLI   :  npm i -g vercel
 #   - Accounts     :  Render, Vercel, Neon (Postgres), Upstash (Redis),
-#                     Agent Router / OpenRouter key, Groq key
+#                     OpenRouter key, Groq key
 #
 # Usage:
 #   chmod +x scripts/deploy-render-vercel.sh
@@ -49,9 +49,8 @@ Required values:
   [ ] CREDENTIAL_ENCRYPTION_KEY  (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
   [ ] DATABASE_URL               (Neon connection string, sslmode=require)
   [ ] REDIS_URL                  (Upstash rediss://... URL)
-  [ ] AGENT_ROUTER_API_KEY
-  [ ] AGENT_ROUTER_BASE_URL      (e.g. https://agentrouter.org/v1 or OpenRouter base)
-  [ ] AGENT_ROUTER_MODEL
+  [ ] OPENROUTER_API_KEY         (https://openrouter.ai/keys)
+  [ ] OPENROUTER_MODEL           (default: openrouter/free)
   [ ] GROQ_API_KEY               (https://console.groq.com)
   [ ] GROQ_MODEL                 (default: llama-3.3-70b-versatile)
 
@@ -67,6 +66,7 @@ echo ">> Step 2 — Checking production files"
 
 for f in \
   render.yaml \
+  backend/ai/providers/openrouter.py \
   backend/ai/providers/groq.py \
   backend/ai/providers/fallback.py \
   backend/apps/common/views.py \
@@ -96,7 +96,7 @@ Option A — Blueprint (recommended)
        DATABASE_URL              = neon connection string
        REDIS_URL                 = upstash rediss://…
        CORS_ALLOWED_ORIGINS      = https://<your-app>.vercel.app   (set after Vercel deploy)
-       AGENT_ROUTER_API_KEY / BASE_URL / MODEL
+       OPENROUTER_API_KEY (model defaults to openrouter/free)
        GROQ_API_KEY
        CREDENTIAL_ENCRYPTION_KEY
   5. Deploy. Note the public URL, e.g. https://tia-backend.onrender.com

@@ -42,14 +42,14 @@ state machine.
 Next.js/TypeScript/Tailwind (frontend) · Django/DRF (backend) ·
 PostgreSQL · Redis + Celery (async jobs) · Playwright (browser
 automation) · a pluggable AI provider abstraction, currently wired to
-Agent Router · a pluggable email provider abstraction, currently wired
+OpenRouter (free router) with a Groq fallback · a pluggable email provider abstraction, currently wired
 to mail.tm.
 
 ## Quickstart
 
 ```bash
 cp .env.example .env
-# fill in DJANGO_SECRET_KEY, CREDENTIAL_ENCRYPTION_KEY, AGENT_ROUTER_*
+# fill in DJANGO_SECRET_KEY, CREDENTIAL_ENCRYPTION_KEY, OPENROUTER_API_KEY, GROQ_API_KEY
 docker compose -f docker/docker-compose.yml up --build
 ```
 
@@ -92,7 +92,7 @@ than glossed over:
 
 - No live Chromium available → browser actions verified via mocked
   Playwright contracts + real DOM tests (jsdom), not a live page.
-- No live network access to Agent Router or mail.tm → both providers
+- No live network access to OpenRouter, Groq or mail.tm → both providers
   verified against documented/realistic schemas, not live calls.
 - No Docker daemon available → Dockerfiles verified via real parsers
   and path checks, not an actual `docker build`.

@@ -13,7 +13,6 @@ judgment.
 import json
 import time
 
-from django.conf import settings
 from django.utils import timezone
 
 from ai.router import get_ai_provider
@@ -42,7 +41,7 @@ class AgentRunner:
         self.provider = get_ai_provider()
         self.tools = build_tool_definitions()
         self.agent_session, _ = AgentSession.objects.get_or_create(
-            job=job, defaults={"provider": self.provider.name, "model": settings.AGENT_ROUTER_MODEL}
+            job=job, defaults={"provider": self.provider.name, "model": (self.provider.model or "")[:100]}
         )
 
     def run(self, target_url: str, resume: bool = False) -> RegistrationJob:
@@ -130,9 +129,16 @@ class AgentRunner:
             self.agent_session.total_output_tokens = (
                 self.agent_session.total_output_tokens or 0
             ) + completion.output_tokens
-        self.agent_session.save(
-            update_fields=["total_input_tokens", "total_output_tokens", "updated_at"]
-        )
+        update_fields = ["total_input_tokens", "total_output_tokens", "updated_at"]
+        # With the fallback chain / a router model, the provider and concrete
+        # model that answered can change mid-job; keep the session row accurate.
+        if completion.provider and completion.provider != self.agent_session.provider:
+            self.agent_session.provider = completion.provider
+            update_fields.append("provider")
+        if completion.model and completion.model[:100] != self.agent_session.model:
+            self.agent_session.model = completion.model[:100]
+            update_fields.append("model")
+        self.agent_session.save(update_fields=update_fields)
 
     def _fail(self, reason: str) -> None:
         self.job.state = RegistrationJob.State.FAILED

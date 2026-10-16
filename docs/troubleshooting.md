@@ -52,17 +52,17 @@ worker runs — this sandbox's own network couldn't reach it, which is
 why `scripts/live_smoke_test_mailtm.py` exists as a standalone way to
 verify it in your actual environment.
 
-## Agent Router requests fail with an unexpected-shape error
+## OpenRouter requests fail or keep falling back to Groq
 
 ```
-AIProviderError: Unexpected Agent Router response shape: ...
+WARNING Primary AI provider (openrouter) failed (OpenRouter returned 429: ...); falling back to groq
 ```
 
-The provider assumes standard OpenAI-compatible `/chat/completions`
-tool calling — see `docs/security.md`'s known limitations. If your
-Agent Router instance uses a different shape, everything that needs to
-change is in `ai/providers/agent_router.py`'s
-`_to_provider_request`/`_from_provider_response`.
+Expected occasionally: `openrouter/free` is rate-limited. If it happens on
+every call, check `OPENROUTER_API_KEY`, and whether your account has hit the
+daily free-model cap (adding credits raises it). A `401` is *not* retried on
+Groq — fix the key. If both providers fail, the error message includes both.
+Shared request/response handling is in `ai/providers/openai_compat.py`.
 
 ## Frontend can't reach the backend (CORS errors)
 

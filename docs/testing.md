@@ -12,7 +12,7 @@ app. Confirmed stable across repeated runs (not flaky).
 | Identities | `apps/identities/tests/test_identities.py` | Password policy + collision-freedom, ownership enforcement, API scoping, 404-not-403 |
 | Email | `apps/email_service/tests/test_email_service.py` | Extraction (link scoring, OTP proximity, malicious-HTML safety), mail.tm schema contract |
 | Browser | `apps/browser/tests/test_browser.py` | Schema parsing, action-layer Playwright call contracts, stale-element handling |
-| AI agent | `apps/ai_agent/tests/test_agent.py` | Tool registry validity, **dispatcher security boundary**, full agent-loop happy path, CAPTCHA pause, step-budget cutoff, structural prompt-injection inertness, Agent Router response parsing |
+| AI agent | `apps/ai_agent/tests/test_agent.py` | Tool registry validity, **dispatcher security boundary**, full agent-loop happy path, CAPTCHA pause, step-budget cutoff, structural prompt-injection inertness, OpenRouter/Groq response parsing, Groq fallback on rate-limit/5xx/network errors |
 | Orchestration | `apps/registration/tests/test_orchestration.py` | Domain policy (blocked/human/default-allow), concurrency + daily quota limits, full job API flow, ownership, resume/cancel guards |
 | Vault | `apps/accounts/tests/test_vault.py` | List/detail never leak passwords, reveal is audit-logged, cross-user denial, delete actually scrubs secrets |
 
@@ -54,7 +54,7 @@ Structural reasoning, not live execution (disclosed, not hidden):
   surface to verify calling contracts; they don't prove real-page
   click/type/screenshot behavior. Verify this first in your own
   environment (`docs/browser-automation.md`).
-- **No live Agent Router or mail.tm network access** — provider tests
+- **No live OpenRouter, Groq or mail.tm network access** — provider tests
   verify request/response transformation against realistic or
   documented shapes, not an actual live call.
 - **No Docker daemon** — Dockerfile/compose correctness verified via

@@ -9,7 +9,7 @@
 # Prerequisites (create these first in their own dashboards):
 #   - Neon Postgres → DATABASE_URL
 #   - Upstash Redis → REDIS_URL (rediss://...)
-#   - Agent Router / OpenRouter key
+#   - OpenRouter key (https://openrouter.ai/keys)
 #   - Groq API key (https://console.groq.com)
 #   - Fernet key for CREDENTIAL_ENCRYPTION_KEY
 
@@ -41,12 +41,12 @@ services:
         sync: false          # https://your-app.vercel.app
       - key: AI_PROVIDER
         value: fallback
-      - key: AGENT_ROUTER_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
-      - key: AGENT_ROUTER_BASE_URL
-        value: https://agentrouter.org/v1
-      - key: AGENT_ROUTER_MODEL
-        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_BASE_URL
@@ -109,15 +109,15 @@ services:
       - fromService:
           type: web
           name: tia-backend
-          envVarKey: AGENT_ROUTER_API_KEY
+          envVarKey: OPENROUTER_API_KEY
       - fromService:
           type: web
           name: tia-backend
-          envVarKey: AGENT_ROUTER_BASE_URL
+          envVarKey: OPENROUTER_BASE_URL
       - fromService:
           type: web
           name: tia-backend
-          envVarKey: AGENT_ROUTER_MODEL
+          envVarKey: OPENROUTER_MODEL
       - fromService:
           type: web
           name: tia-backend

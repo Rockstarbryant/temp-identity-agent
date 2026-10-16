@@ -190,15 +190,20 @@ CREDENTIAL_ENCRYPTION_KEY = env("CREDENTIAL_ENCRYPTION_KEY", default=None)
 
 # --- AI provider ---------------------------------------------------------------
 # Options:
-#   agent_router  – primary OpenAI-compatible proxy (Agent Router / OpenRouter style)
-#   groq          – Groq only
-#   fallback      – try agent_router first; on 429 / 5xx / network error → Groq
-# If left empty and both AGENT_ROUTER_* and GROQ_API_KEY are set, "fallback" is used.
+#   openrouter  – OpenRouter only (default model: openrouter/free)
+#   groq        – Groq only
+#   fallback    – try OpenRouter first; on 429 / 5xx / network error → Groq
+# If left empty, "fallback" is used when both OPENROUTER_API_KEY and
+# GROQ_API_KEY are set; otherwise whichever one is configured.
 AI_PROVIDER = env("AI_PROVIDER", default="fallback")
 
-AGENT_ROUTER_API_KEY = env("AGENT_ROUTER_API_KEY", default="")
-AGENT_ROUTER_BASE_URL = env("AGENT_ROUTER_BASE_URL", default="")
-AGENT_ROUTER_MODEL = env("AGENT_ROUTER_MODEL", default="")
+# OpenRouter (primary). `openrouter/free` auto-selects an available free model.
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
+OPENROUTER_BASE_URL = env("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="openrouter/free")
+# Optional attribution headers sent to OpenRouter.
+OPENROUTER_SITE_URL = env("OPENROUTER_SITE_URL", default="")
+OPENROUTER_APP_NAME = env("OPENROUTER_APP_NAME", default="Temporary Identity Agent")
 
 # Groq (fallback or primary)
 GROQ_API_KEY = env("GROQ_API_KEY", default="")

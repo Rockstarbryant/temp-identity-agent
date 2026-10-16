@@ -7,9 +7,12 @@ from rest_framework.test import APIClient
 def _test_settings(settings):
     """Ensure every test run has the settings the app requires, regardless of .env."""
     settings.CREDENTIAL_ENCRYPTION_KEY = Fernet.generate_key().decode()
-    settings.AGENT_ROUTER_API_KEY = "test-key"
-    settings.AGENT_ROUTER_BASE_URL = "https://fake-router.example"
-    settings.AGENT_ROUTER_MODEL = "test-model"
+    settings.OPENROUTER_API_KEY = "test-openrouter-key"
+    settings.OPENROUTER_BASE_URL = "https://fake-openrouter.example/api/v1"
+    settings.OPENROUTER_MODEL = "openrouter/free"
+    settings.GROQ_API_KEY = "test-groq-key"
+    settings.GROQ_BASE_URL = "https://fake-groq.example/openai/v1"
+    settings.GROQ_MODEL = "test-groq-model"
     settings.ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True

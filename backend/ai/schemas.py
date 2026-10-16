@@ -3,7 +3,7 @@ Provider-agnostic schemas for chat + tool calling.
 
 Every AIProvider implementation converts its own API's request/response
 shape to and from these — nothing else in the codebase should know what
-"Agent Router" or any other provider's raw JSON looks like.
+OpenRouter, Groq or any other provider's raw JSON looks like.
 """
 from typing import Any, Literal
 
@@ -40,6 +40,11 @@ class CompletionResult(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     stop_reason: str = ""
+    # Which provider / concrete model actually answered. With a router
+    # model like `openrouter/free` or a fallback chain, this can differ
+    # from what was configured, so it's reported per call.
+    provider: str = ""
+    model: str = ""
 
 
 ChatMessage.model_rebuild()

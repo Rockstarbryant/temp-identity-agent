@@ -10,7 +10,7 @@ graph TD
     REDIS --> WORKER[Celery worker]
     REDIS --> BEAT[Celery beat<br/>periodic cleanup]
     WORKER --> AGENT[Agent loop]
-    AGENT -->|tool calls| AI[AI provider<br/>Agent Router]
+    AGENT -->|tool calls| AI[AI provider<br/>OpenRouter → Groq fallback]
     AGENT -->|browser.*| PW[Playwright]
     AGENT -->|email.*| MAIL[mail.tm provider]
     PW -->|SSRF-checked| TARGET[Target website]
@@ -80,8 +80,8 @@ candidate rather than silently built halfway.
 - **`apps/browser`** — Playwright lifecycle, page inspection (DOM →
   structured JSON), and the allowlisted action functions. This is the
   *entire* surface the agent can act through.
-- **`ai/`** — provider-agnostic chat/tool schemas, the Agent Router
-  implementation, and the system prompt. Nothing here is Django-specific
+- **`ai/`** — provider-agnostic chat/tool schemas, the OpenRouter/Groq
+  providers (with automatic fallback), and the system prompt. Nothing here is Django-specific
   except the settings lookup.
 - **`apps/ai_agent`** — the tool registry (Pydantic-validated), the
   dispatcher (the actual security boundary), and the reasoning loop.

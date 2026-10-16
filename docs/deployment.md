@@ -5,7 +5,7 @@
 ```bash
 cp .env.example .env
 # fill in real values — at minimum DJANGO_SECRET_KEY, CREDENTIAL_ENCRYPTION_KEY,
-# AGENT_ROUTER_*, and a real EMAIL_API_BASE_URL if not using mail.tm's default
+# OPENROUTER_API_KEY (and GROQ_API_KEY for the fallback), and a real EMAIL_API_BASE_URL if not using mail.tm's default
 docker compose -f docker/docker-compose.yml up --build
 ```
 
