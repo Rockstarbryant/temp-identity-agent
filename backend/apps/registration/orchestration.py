@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from apps.ai_agent.agent_loop import AgentRunner
 from apps.audit.models import AuditLog
+from apps.common.db import ensure_db_connection
 from apps.common.exceptions import (
     DomainBlockedError,
     RateLimitedError,
@@ -111,15 +112,18 @@ def start_registration_job(job_id) -> RegistrationJob:
     try:
         AgentRunner(job).run(job.target_website.registration_url, resume=False)
     except TempIdentityAgentError as exc:
+        ensure_db_connection()
         job.refresh_from_db()
         if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
             _fail(job, exc.code, exc.message)
     except Exception as exc:  # noqa: BLE001 — never let an unexpected error leave a job stuck
         logger.exception("Unhandled error running job %s", job.id)
+        ensure_db_connection()
         job.refresh_from_db()
         if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
             _fail(job, "AI_ERROR", f"Unexpected error: {exc}")
 
+    ensure_db_connection()
     job.refresh_from_db()
     AuditLog.objects.create(
         user=job.user, action="job.finished", resource_type="RegistrationJob",
@@ -145,15 +149,18 @@ def resume_registration_job(job_id) -> RegistrationJob:
     try:
         AgentRunner(job).run(job.target_website.registration_url, resume=True)
     except TempIdentityAgentError as exc:
+        ensure_db_connection()
         job.refresh_from_db()
         if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
             _fail(job, exc.code, exc.message)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error resuming job %s", job.id)
+        ensure_db_connection()
         job.refresh_from_db()
         if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
             _fail(job, "AI_ERROR", f"Unexpected error: {exc}")
 
+    ensure_db_connection()
     job.refresh_from_db()
     return job
 

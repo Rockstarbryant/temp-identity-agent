@@ -26,6 +26,7 @@ from apps.ai_agent.tools import build_tool_definitions
 from apps.ai_agent.models import AgentSession
 from apps.ai_agent.step_detail import describe_step, index_elements, redact_for_storage
 from apps.browser import live_view
+from apps.common.db import ensure_db_connection
 from apps.browser.playwright_client import ManagedBrowserSession
 from apps.email_service.models import TemporaryEmail
 from apps.registration.models import RegistrationJob, RegistrationStep
@@ -91,6 +92,7 @@ class AgentRunner:
                     break
 
                 completion = self.provider.complete(messages, self.tools)
+                ensure_db_connection()  # the LLM call can outlast the DB's idle timeout
                 messages.append(completion.message)
                 self._record_usage(completion)
 
@@ -105,6 +107,7 @@ class AgentRunner:
                     # Look the element up *before* the call: a click changes the page.
                     element = elements.get(str(tool_call.arguments.get("element_id", "")))
                     outcome = dispatch_tool_call(ctx, tool_call)
+                    ensure_db_connection()  # page loads / mailbox waits are slow too
                     self._persist_step(step_index, tool_call, outcome, element)
                     if outcome.get("success"):
                         fresh = index_elements(outcome)
@@ -185,6 +188,7 @@ class AgentRunner:
         end = time.monotonic() + max_wait
         try:
             while time.monotonic() < end:
+                ensure_db_connection()
                 self.job.refresh_from_db(fields=["state"])
                 if self.job.state not in RegistrationJob.RESUMABLE_STATES:
                     return False  # cancelled (or otherwise changed) while waiting
