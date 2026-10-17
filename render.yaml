@@ -52,7 +52,7 @@ services:
       - key: GROQ_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: ""
       - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
       - key: EMAIL_PROVIDER

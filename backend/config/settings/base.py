@@ -240,7 +240,8 @@ OPENROUTER_APP_NAME = env("OPENROUTER_APP_NAME", default="Temporary Identity Age
 # Groq (fallback or primary)
 GROQ_API_KEY = env("GROQ_API_KEY", default="")
 GROQ_BASE_URL = env("GROQ_BASE_URL", default="https://api.groq.com/openai/v1")
-GROQ_MODEL = env("GROQ_MODEL", default="llama-3.3-70b-versatile")
+# Leave empty to let the app pick a chat model your key can use (recommended).
+GROQ_MODEL = env("GROQ_MODEL", default="")
 
 MAX_AGENT_STEPS = env.int("MAX_AGENT_STEPS", default=30)
 MAX_JOB_DURATION_SECONDS = env.int("MAX_JOB_DURATION_SECONDS", default=300)
