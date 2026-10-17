@@ -101,3 +101,23 @@ class TestMailTmProviderContract:
         detail = provider.get_message(mailbox.credential, "m1")
         assert isinstance(detail.html_body, str)
         assert "https://site.com/v?t=1" in detail.html_body
+
+
+class TestMailboxLocalPart:
+    def test_generated_local_part_is_always_a_valid_address(self):
+        import re
+        from unittest.mock import MagicMock, patch
+
+        from apps.email_service.providers.mailtm import MailTmProvider
+
+        provider = MailTmProvider()
+        for _ in range(200):
+            with patch.object(MailTmProvider, "_client") as client_factory, \
+                 patch.object(MailTmProvider, "_get_domain", return_value="test.example"):
+                client = client_factory.return_value.__enter__.return_value
+                client.post.side_effect = [
+                    MagicMock(status_code=201, json=lambda: {"id": "1"}, text=""),
+                    MagicMock(status_code=200, json=lambda: {"token": "t", "id": "1"}, text=""),
+                ]
+                mailbox = provider.create_mailbox()
+            assert re.fullmatch(r"[a-z0-9]{12}@test\.example", mailbox.address), mailbox.address

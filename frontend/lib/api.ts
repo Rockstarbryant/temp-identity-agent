@@ -1,3 +1,5 @@
+import { clearCache } from "@/lib/cache";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
@@ -89,7 +91,10 @@ export interface RegistrationStep {
   step_index: number;
   action: string;
   tool_name: string;
-  tool_result: { success: boolean; result?: unknown; error?: string };
+  /** Secret-free description, e.g. "Clicked the “Sign up” button". May be empty. */
+  detail: string;
+  success: boolean;
+  error: string;
   created_at: string;
 }
 
@@ -106,6 +111,11 @@ export interface RegistrationJob {
   identity_id: string | null;
   error_code: string;
   error_message: string;
+  /** AI provider and concrete model that handled the job ("" until the first call). */
+  provider: string;
+  model: string;
+  /** Vault entry created by a completed job. */
+  account_id: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -167,6 +177,7 @@ export async function logout() {
     }
   } finally {
     clearTokens();
+    clearCache();
   }
 }
 
@@ -201,6 +212,18 @@ export async function resumeRegistrationJob(id: string) {
 
 export async function cancelRegistrationJob(id: string) {
   return request<RegistrationJob>(`/api/registration-jobs/${id}/cancel/`, { method: "POST" });
+}
+
+export async function retryRegistrationJob(id: string) {
+  return request<RegistrationJob>(`/api/registration-jobs/${id}/retry/`, { method: "POST" });
+}
+
+export async function deleteRegistrationJob(id: string) {
+  return request<void>(`/api/registration-jobs/${id}/`, { method: "DELETE" });
+}
+
+export async function clearFinishedJobs() {
+  return request<{ cleared: number }>("/api/registration-jobs/clear-finished/", { method: "POST" });
 }
 
 // --- Account vault -----------------------------------------------------------

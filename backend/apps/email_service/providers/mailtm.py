@@ -16,6 +16,8 @@ This provider does not implement its own client-side rate limiting —
 callers issuing bursts of requests (e.g. many concurrent jobs) should
 throttle at the Celery task level.
 """
+import secrets
+import string
 import time
 
 import httpx
@@ -51,9 +53,12 @@ class MailTmProvider(EmailProvider):
     def create_mailbox(self, local_part: str | None = None) -> ProvisionedMailbox:
         with self._client() as client:
             domain = self._get_domain(client)
-            local_part = local_part or generate_password(
-                length=12, min_upper=0, min_lower=4, min_digits=4, min_symbols=0
-            ).lower()
+            # Letters and digits only: generate_password() fills spare slots from
+            # the full pool (symbols included), which produced invalid addresses
+            # like "x9tn*7(9l9$l@..." roughly half the time.
+            local_part = local_part or "".join(
+                secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12)
+            )
             address = f"{local_part}@{domain}"
             # mail.tm requires the account password to satisfy its own
             # minimum length; we generate a strong one and store it via

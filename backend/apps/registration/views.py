@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -29,7 +30,10 @@ class RegistrationJobListCreateView(generics.ListCreateAPIView):
     throttle_scope = "registration_jobs"
 
     def get_queryset(self):
-        return RegistrationJob.objects.filter(user=self.request.user)
+        return (
+            RegistrationJob.objects.filter(user=self.request.user, dismissed_at__isnull=True)
+            .select_related("target_website", "identity", "agent_session", "account")
+        )
 
     def get_serializer_class(self):
         return RegistrationJobCreateSerializer if self.request.method == "POST" else RegistrationJobSerializer
@@ -59,14 +63,98 @@ class RegistrationJobListCreateView(generics.ListCreateAPIView):
         return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
 
-class RegistrationJobDetailView(generics.RetrieveAPIView):
-    """GET /api/registration-jobs/{id}/ — full detail including step history."""
+class RegistrationJobDetailView(generics.RetrieveDestroyAPIView):
+    """
+    GET    /api/registration-jobs/{id}/ — full detail including step history.
+    DELETE /api/registration-jobs/{id}/ — remove a finished job from the dashboard.
+
+    Delete hides the job (soft-delete). The vault account created by a
+    completed job is NOT touched — delete that from the vault itself.
+    A job that is still running must be cancelled first.
+    """
 
     serializer_class = RegistrationJobDetailSerializer
     permission_classes = [permissions.IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        return RegistrationJob.objects.filter(user=self.request.user).prefetch_related("steps")
+        return (
+            RegistrationJob.objects.filter(user=self.request.user, dismissed_at__isnull=True)
+            .select_related("target_website", "identity", "agent_session", "account")
+            .prefetch_related("steps")
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        job = self.get_object()
+        if job.state in RegistrationJob.ACTIVE_STATES:
+            return Response(
+                {"detail": "This job is still running. Cancel it before deleting."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        job.dismissed_at = timezone.now()
+        job.save(update_fields=["dismissed_at", "updated_at"])
+        AuditLog.objects.create(
+            user=request.user, action="job.dismissed", resource_type="RegistrationJob",
+            resource_id=str(job.id),
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RegistrationJobRetryView(APIView):
+    """
+    POST /api/registration-jobs/{id}/retry/ — start a fresh job for the same
+    site. The original stays as a record of the failed attempt.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "registration_jobs"
+
+    RETRYABLE_STATES = {
+        RegistrationJob.State.FAILED,
+        RegistrationJob.State.CANCELLED,
+        RegistrationJob.State.EXPIRED,
+    }
+
+    def post(self, request, pk):
+        old = _get_owned_job_or_404(request.user, pk)
+        if old.state not in self.RETRYABLE_STATES:
+            return Response(
+                {"detail": f"Only failed, cancelled or expired jobs can be retried (this one is {old.state!r})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        job = RegistrationJob.objects.create(user=request.user, target_website=old.target_website)
+        AuditLog.objects.create(
+            user=request.user, action="job.retried", resource_type="RegistrationJob",
+            resource_id=str(job.id), metadata={"retry_of": str(old.id), "domain": old.target_website.domain},
+        )
+        run_registration_job_task.delay(str(job.id))
+        job.refresh_from_db()
+        return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+
+class RegistrationJobClearFinishedView(APIView):
+    """
+    POST /api/registration-jobs/clear-finished/ — hide every failed, cancelled
+    and expired job at once. Completed jobs are left alone.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        cleared = RegistrationJob.objects.filter(
+            user=request.user,
+            dismissed_at__isnull=True,
+            state__in=[
+                RegistrationJob.State.FAILED,
+                RegistrationJob.State.CANCELLED,
+                RegistrationJob.State.EXPIRED,
+            ],
+        ).update(dismissed_at=timezone.now())
+        AuditLog.objects.create(
+            user=request.user, action="job.cleared_finished", resource_type="RegistrationJob",
+            resource_id="", metadata={"count": cleared},
+        )
+        return Response({"cleared": cleared}, status=status.HTTP_200_OK)
 
 
 class RegistrationJobResumeView(APIView):

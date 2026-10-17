@@ -6,6 +6,7 @@ import {
   getAccount, revealCredentials, deleteAccount,
   TemporaryAccountSummary, RevealedCredentials, isAuthenticated,
 } from "@/lib/api";
+import { invalidate } from "@/lib/cache";
 import { Loader2, Copy, Check, Eye, Trash2 } from "lucide-react";
 
 function CopyButton({ value }: { value: string }) {
@@ -58,6 +59,7 @@ export default function AccountDetailPage() {
     setLoading(true);
     try {
       await deleteAccount(id);
+      invalidate("accounts");
       router.push("/accounts");
     } catch {
       setError("Could not delete this account.");

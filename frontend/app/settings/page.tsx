@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getMe, logout, isAuthenticated, User } from "@/lib/api";
+import { getMe, logout, isAuthenticated } from "@/lib/api";
+import { useCachedData } from "@/lib/useCachedData";
 import { Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
-  const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login?next=/settings");
-      return;
-    }
-    getMe().then(setUser).catch(() => setUser(null));
+    if (!isAuthenticated()) router.push("/login?next=/settings");
   }, [router]);
+
+  const { data: user } = useCachedData("me", getMe);
 
   async function handleLogout() {
     await logout();

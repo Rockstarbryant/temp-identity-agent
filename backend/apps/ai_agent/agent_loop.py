@@ -13,6 +13,7 @@ judgment.
 import json
 import time
 
+from django.db.models import Max
 from django.utils import timezone
 
 from ai.router import get_ai_provider
@@ -22,6 +23,7 @@ from apps.ai_agent.context import AgentContext
 from apps.ai_agent.dispatcher import dispatch_tool_call
 from apps.ai_agent.tools import build_tool_definitions
 from apps.ai_agent.models import AgentSession
+from apps.ai_agent.step_detail import describe_step, index_elements, redact_for_storage
 from apps.browser.playwright_client import ManagedBrowserSession
 from apps.email_service.models import TemporaryEmail
 from apps.registration.models import RegistrationJob, RegistrationStep
@@ -70,9 +72,15 @@ class AgentRunner:
             if self.job.identity is not None:
                 ctx.identity = self.job.identity
                 ctx.mailbox = TemporaryEmail.objects.filter(identity=self.job.identity).first()
-            step_index = 0
+            # A resumed job already has steps 0..n from the earlier run; continue
+            # numbering after them (job+step_index is unique). The browser itself
+            # is a fresh one, so the agent re-inspects the page first.
+            last_index = self.job.steps.aggregate(m=Max("step_index"))["m"]
+            step_index = 0 if last_index is None else last_index + 1
+            elements: dict[str, dict] = {}
+            step_budget = step_index + self.job.max_steps
 
-            while step_index < self.job.max_steps:
+            while step_index < step_budget:
                 if time.monotonic() > deadline:
                     self._fail("Job exceeded its time budget (MAX_JOB_DURATION_SECONDS).")
                     break
@@ -89,8 +97,14 @@ class AgentRunner:
                     continue
 
                 for tool_call in completion.message.tool_calls:
+                    # Look the element up *before* the call: a click changes the page.
+                    element = elements.get(str(tool_call.arguments.get("element_id", "")))
                     outcome = dispatch_tool_call(ctx, tool_call)
-                    self._persist_step(step_index, tool_call, outcome)
+                    self._persist_step(step_index, tool_call, outcome, element)
+                    if outcome.get("success"):
+                        fresh = index_elements(outcome)
+                        if fresh:
+                            elements = fresh
                     messages.append(
                         ChatMessage(
                             role="tool", tool_call_id=tool_call.id, content=json.dumps(outcome)
@@ -110,14 +124,18 @@ class AgentRunner:
         self.agent_session.save(update_fields=["total_steps", "updated_at"])
         return self.job
 
-    def _persist_step(self, step_index: int, tool_call, outcome: dict) -> None:
+    def _persist_step(self, step_index: int, tool_call, outcome: dict, element: dict | None = None) -> None:
+        safe_input, safe_outcome = redact_for_storage(
+            tool_call.name, tool_call.arguments, element, outcome
+        )
         RegistrationStep.objects.create(
             job=self.job,
             step_index=step_index,
             action=tool_call.name,
             tool_name=tool_call.name,
-            tool_input=tool_call.arguments,
-            tool_result=outcome,
+            tool_input=safe_input,
+            tool_result=safe_outcome,
+            detail=describe_step(tool_call.name, tool_call.arguments, element, outcome),
         )
 
     def _record_usage(self, completion) -> None:

@@ -1,22 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { listAccounts, isAuthenticated, TemporaryAccountSummary } from "@/lib/api";
+import { listAccounts, isAuthenticated } from "@/lib/api";
+import { useCachedData } from "@/lib/useCachedData";
 import { Loader2, KeyRound } from "lucide-react";
 
 export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<TemporaryAccountSummary[] | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login?next=/accounts");
-      return;
-    }
-    listAccounts().then((data) => setAccounts(data.results)).catch(() => setAccounts([]));
+    if (!isAuthenticated()) router.push("/login?next=/accounts");
   }, [router]);
+
+  const { data, loading } = useCachedData("accounts", async () => (await listAccounts()).results);
+  const accounts = loading ? null : data ?? [];
 
   return (
     <div>

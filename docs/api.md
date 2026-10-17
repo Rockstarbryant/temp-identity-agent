@@ -33,9 +33,12 @@ Read-only — identities are created internally by the agent
 |---|---|---|---|
 | POST | `/api/registration-jobs/` | `{url}` | Validates the URL through the real SSRF guard before creating anything. Throttled `10/hour`. Enqueues a Celery task and returns current state (refreshed from DB after dispatch, not a stale snapshot). |
 | GET | `/api/registration-jobs/` | — | The user's own jobs. |
-| GET | `/api/registration-jobs/{id}/` | — | Includes full `steps` audit trail. |
+| GET | `/api/registration-jobs/{id}/` | — | Includes `steps` (each with a secret-free `detail`, `success`, `error`), plus `provider`/`model` (the AI that handled the job) and `account_id` once completed. |
 | POST | `/api/registration-jobs/{id}/resume/` | — | Only valid from `captcha_required`/`human_action_required`. `400` otherwise. |
 | POST | `/api/registration-jobs/{id}/cancel/` | — | Only valid for non-terminal jobs. `400` otherwise. |
+| POST | `/api/registration-jobs/{id}/retry/` | — | Starts a new job for the same site. Only valid from `failed`/`cancelled`/`expired`; the original stays as a record. Throttled like job creation. |
+| DELETE | `/api/registration-jobs/{id}/` | — | Hides a finished or paused job from the dashboard (soft delete). `400` while the job is running. A vault account created by the job is not touched. |
+| POST | `/api/registration-jobs/clear-finished/` | — | Hides every failed/cancelled/expired job. Returns `{"cleared": n}`. Completed jobs are kept. |
 
 Job `state` values: `queued`, `starting`, `opening_site`, `analyzing`,
 `identity_created`, `filling_form`, `submitting`, `waiting_for_email`,

@@ -87,6 +87,9 @@ class RegistrationJob(UUIDTimeStampedModel):
     error_message = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    # "Deleting" a job from the dashboard hides it instead of removing the row:
+    # the vault account (which hangs off the job) and the audit trail stay intact.
+    dismissed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(UUIDTimeStampedModel.Meta):
         indexes = [
@@ -114,6 +117,8 @@ class RegistrationStep(UUIDTimeStampedModel):
     tool_name = models.CharField(max_length=100, blank=True)
     tool_input = models.JSONField(default=dict, blank=True)
     tool_result = models.JSONField(default=dict, blank=True)
+    # Human-readable, secret-free description shown in the job timeline.
+    detail = models.CharField(max_length=300, blank=True)
     screenshot_path = models.CharField(max_length=500, blank=True)
 
     class Meta(UUIDTimeStampedModel.Meta):
