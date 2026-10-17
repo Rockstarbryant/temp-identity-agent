@@ -21,6 +21,9 @@ class PageElement(BaseModel):
     value: str = ""  # current value, if any (e.g. pre-filled input)
     visible: bool = True
     options: list[str] = []  # for <select> elements
+    group: str = ""  # the question this control belongs to (radios, checkboxes, form-builder fields)
+    checked: bool | None = None  # radios / checkboxes / switches
+    required: bool = False
 
 
 class PageSnapshot(BaseModel):

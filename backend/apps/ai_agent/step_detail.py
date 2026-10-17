@@ -94,6 +94,33 @@ def describe_step(
             text = f"Verification email arrived: “{_short(result.get('subject', ''), 50)}”"
         else:
             text = f"No verification email arrived after {args.get('timeout_seconds', 60)}s"
+    elif tool_name == "browser.read_text":
+        text = "Read the text on the page"
+    elif tool_name == "profile.get":
+        keys = args.get("keys") or []
+        text = f"Looked up your saved details ({', '.join(str(k) for k in keys[:6])})" if keys else "Checked which details you have saved"
+    elif tool_name == "user.ask":
+        q = _short(args.get("question", ""), 120)
+        if not ok:
+            text = f"Asked you: “{q}”"
+        elif result.get("source") == "saved":
+            text = f"Used your saved answer for “{q}”"
+        elif result.get("answered"):
+            if args.get("sensitive"):
+                text = f"You answered: “{q}” (hidden)"
+            else:
+                text = f"You answered “{q}”: {_short(result.get('answer', ''), 80)}"
+        else:
+            text = f"Asked you “{q}” — no answer ({_short(result.get('reason', ''), 80)})"
+    elif tool_name == "site.report_auth_methods":
+        if args.get("email_password"):
+            text = "Checked sign-in options: email and password is supported"
+        else:
+            text = "Checked sign-in options: no email/password sign-in (" + ", ".join(args.get("methods") or ["social only"]) + ")"
+    elif tool_name == "form.complete":
+        text = f"Submitted the form ({len(args.get('submitted') or [])} answers)"
+    elif tool_name == "data.submit_result":
+        text = "Saved the extracted information"
     elif tool_name.startswith("registration.mark_"):
         reason = args.get("reason", "")
         text = _short(reason, 200) if reason else ""
@@ -127,6 +154,10 @@ def redact_for_storage(
     if isinstance(result, dict):
         if tool_name == "identity.get" and "password" in result:
             result["password"] = HIDDEN
+        if tool_name == "profile.get" and "values" in result:
+            result["values"] = {k: HIDDEN for k in result["values"]}
+        if tool_name == "user.ask" and "answer" in result and (args.get("sensitive") or result.get("source") == "saved"):
+            result["answer"] = HIDDEN
         snap = result.get("snapshot")
         if isinstance(snap, dict):
             for el in snap.get("elements", []):

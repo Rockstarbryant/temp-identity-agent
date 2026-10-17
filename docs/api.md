@@ -82,3 +82,26 @@ resource exists.
   `{type: key, key}` | `{type: scroll, dy}`. `409` unless the browser is waiting for input.
 - `POST /api/registration-jobs/{id}/resume/` — while the worker still holds the browser this signals it to
   continue in the same browser; otherwise it starts a fresh run as before.
+
+## Settings, saved details and email
+
+- `GET /api/profile/` — `{account_mode, standard_fields, entries}` (entries are decrypted for the owner only).
+- `PATCH /api/preferences/` — `{"account_mode": "temporary" | "permanent"}`.
+- `PUT /api/profile/entries/{key}/` — `{value, label?}`; an empty value deletes. Keys that look like secrets (password, pin, card number…) are refused. `DELETE` also removes.
+- `GET|PUT|DELETE /api/email-connection/` — the user's own mailbox for permanent accounts. `PUT {address, password, host?}` logs in over IMAP (port 993 only, host must resolve to a public address) before saving; the secret is stored encrypted and never returned.
+- `POST /api/email-connection/test/` — re-check the saved connection.
+- `GET /api/email-connection/gmail/authorize/` → `{url}` (501 if `GOOGLE_OAUTH_*` is not configured); `GET .../gmail/callback/` is Google's redirect target (signed `state`, read-only Gmail scope).
+
+## Questions from the agent
+
+While a job runs the agent can ask for a missing detail. The job moves to `waiting_for_user` and `GET /api/registration-jobs/{id}/` includes `pending_question: {id, key, question, options, sensitive}`.
+
+- `POST /api/registration-jobs/{id}/questions/{qid}/answer/` — `{answer, remember?}` or `{skip: true}`. `remember` saves it as a profile entry under the question's key.
+
+Job fields added: `kind` (`registration` | `form`), `source` (`web` | `mcp`), `account_mode`, `target_url`, `goal`, `result`, `auth_check`. Pasting a Google Form URL (`docs.google.com/forms/...` or `forms.gle/...`) creates a `form` job; its `result.submitted` lists every question and answer that was sent.
+
+## MCP server
+
+`POST /mcp/` with `Authorization: Bearer tia_…` (Streamable HTTP, JSON responses; stateless). Keys: `GET|POST /api/api-keys/`, `DELETE /api/api-keys/{id}/` (the key is shown once; only a hash is stored).
+
+Tools: `register_on_site{url, extraction_goal?, account_mode?}`, `get_job{job_id}`, `list_jobs`, `answer_question{job_id, question_id, answer}`, `cancel_job{job_id}`. Jobs started over MCP must first call the agent's `site.report_auth_methods`; a site with no email + password sign-in ends with `error_code: AUTH_METHOD_UNSUPPORTED` and nothing is created. Passwords are never returned over MCP.

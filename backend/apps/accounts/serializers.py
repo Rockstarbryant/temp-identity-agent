@@ -8,11 +8,16 @@ class TemporaryAccountSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source="identity.email", read_only=True)
     username = serializers.CharField(source="identity.username", read_only=True)
     expires_at = serializers.DateTimeField(source="identity.expires_at", read_only=True)
+    permanent = serializers.SerializerMethodField()
 
     class Meta:
         model = TemporaryAccount
-        fields = ["id", "domain", "email", "username", "status", "revealed_at", "expires_at", "created_at"]
+        fields = ["id", "domain", "email", "username", "status", "revealed_at", "expires_at", "created_at", "permanent"]
         read_only_fields = fields
+
+
+    def get_permanent(self, obj) -> bool:
+        return obj.job.account_mode == "permanent"
 
 
 class RevealCredentialsResponseSerializer(serializers.Serializer):
@@ -21,3 +26,4 @@ class RevealCredentialsResponseSerializer(serializers.Serializer):
     password = serializers.CharField()
     domain = serializers.CharField()
     expires_at = serializers.DateTimeField()
+    permanent = serializers.BooleanField(default=False)

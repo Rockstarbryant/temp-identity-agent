@@ -1,7 +1,7 @@
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
-from apps.registration.models import RegistrationJob, RegistrationStep, TargetWebsite
+from apps.registration.models import AgentQuestion, RegistrationJob, RegistrationStep
 
 
 class RegistrationJobCreateSerializer(serializers.Serializer):
@@ -53,7 +53,7 @@ class RegistrationJobSerializer(serializers.ModelSerializer):
         model = RegistrationJob
         fields = [
             "id", "domain", "state", "identity_id", "error_code", "error_message",
-            "provider", "model", "account_id",
+            "provider", "model", "account_id", "kind", "source", "account_mode",
             "created_at", "started_at", "completed_at",
         ]
         read_only_fields = fields
@@ -79,12 +79,27 @@ class RegistrationJobSerializer(serializers.ModelSerializer):
             return None
 
 
+class PendingQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentQuestion
+        fields = ["id", "key", "question", "options", "sensitive", "created_at"]
+        read_only_fields = fields
+
+
 class RegistrationJobDetailSerializer(RegistrationJobSerializer):
     steps = RegistrationStepSerializer(many=True, read_only=True)
+    pending_question = serializers.SerializerMethodField()
+    target_url = serializers.CharField(read_only=True)
 
     class Meta(RegistrationJobSerializer.Meta):
-        fields = RegistrationJobSerializer.Meta.fields + ["steps"]
+        fields = RegistrationJobSerializer.Meta.fields + [
+            "steps", "pending_question", "result", "auth_check", "target_url", "goal",
+        ]
         read_only_fields = fields
+
+    def get_pending_question(self, obj):
+        q = obj.questions.filter(status=AgentQuestion.Status.PENDING).order_by("created_at").first()
+        return PendingQuestionSerializer(q).data if q else None
 
 
 class LiveInputSerializer(serializers.Serializer):

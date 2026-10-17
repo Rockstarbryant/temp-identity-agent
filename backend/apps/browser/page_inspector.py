@@ -21,7 +21,8 @@ from apps.browser.schemas import PageElement, PageSnapshot
 # aria-label, placeholder, then nearest visible text as a fallback).
 _INSPECT_JS = """
 () => {
-    const SELECTOR = 'input:not([type="hidden"]), select, textarea, button, a[href], [role="button"]';
+    const SELECTOR = 'input:not([type="hidden"]), select, textarea, button, a[href], [role="button"], ' +
+        '[role="radio"], [role="checkbox"], [role="option"], [role="combobox"], [role="listbox"], [role="textbox"], [role="switch"]';
     const elements = Array.from(document.querySelectorAll(SELECTOR));
     let counter = 0;
 
@@ -44,6 +45,13 @@ _INSPECT_JS = """
         }
         const ariaLabel = el.getAttribute('aria-label');
         if (ariaLabel) return ariaLabel.trim();
+        const labelledBy = el.getAttribute('aria-labelledby');
+        if (labelledBy) {
+            const text = labelledBy.split(/\\s+/)
+                .map((id) => { const n = document.getElementById(id); return n ? n.innerText.trim() : ''; })
+                .filter(Boolean).join(' ');
+            if (text) return text.slice(0, 200);
+        }
         const parentLabel = el.closest('label');
         if (parentLabel) {
             const text = ownLabelText(parentLabel);
@@ -53,6 +61,34 @@ _INSPECT_JS = """
         const ownText = el.innerText?.trim() || el.textContent?.trim();
         if (ownText) return ownText.slice(0, 200);
         return '';
+    }
+
+    function groupFor(el) {
+        // The question this control answers: a fieldset legend, or the heading of its
+        // list item / form group (Google Forms and most custom form builders).
+        const fieldset = el.closest('fieldset');
+        const legend = fieldset && fieldset.querySelector('legend');
+        if (legend && legend.innerText.trim()) return legend.innerText.trim().slice(0, 200);
+        let node = el.parentElement;
+        for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+            if (!node.matches('[role="listitem"], [role="group"], [role="radiogroup"], .form-group')) continue;
+            const heading = node.querySelector('[role="heading"], legend, label, h1, h2, h3, h4');
+            if (heading && heading.innerText.trim()) return heading.innerText.trim().slice(0, 200);
+            if (node.getAttribute('role') === 'listitem') {
+                // Form builders put the question text first in the list item.
+                const first = (node.innerText || '').split('\\n').map((t) => t.trim()).find(Boolean);
+                if (first) return first.slice(0, 200);
+            }
+        }
+        return '';
+    }
+
+    function checkedState(el) {
+        const aria = el.getAttribute('aria-checked');
+        if (aria === 'true') return true;
+        if (aria === 'false') return false;
+        if (el.type === 'checkbox' || el.type === 'radio') return !!el.checked;
+        return null;
     }
 
     function isVisible(el) {
@@ -72,7 +108,7 @@ _INSPECT_JS = """
         return {
             element_id: el.getAttribute('data-tia-id'),
             tag: el.tagName.toLowerCase(),
-            type: el.getAttribute('type') || '',
+            type: el.getAttribute('type') || el.getAttribute('role') || '',
             name: el.getAttribute('name') || '',
             label: labelFor(el),
             placeholder: el.getAttribute('placeholder') || '',
@@ -80,6 +116,9 @@ _INSPECT_JS = """
             value: el.value !== undefined ? String(el.value) : '',
             visible: isVisible(el),
             options: options,
+            group: groupFor(el),
+            checked: checkedState(el),
+            required: el.required === true || el.getAttribute('aria-required') === 'true',
         };
     });
 }

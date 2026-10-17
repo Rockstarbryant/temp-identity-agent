@@ -21,7 +21,7 @@ class TestToolRegistry:
             assert definition.parameters.get("type") == "object" or "properties" in definition.parameters
 
     def test_registry_matches_spec_tool_set(self):
-        expected_prefixes = {"browser.", "identity.", "email.", "registration."}
+        expected_prefixes = {"browser.", "identity.", "email.", "registration.", "profile.", "user.", "site.", "form.", "data."}
         for name in TOOL_REGISTRY:
             assert any(name.startswith(p) for p in expected_prefixes), f"{name} not in an expected namespace"
 
@@ -283,6 +283,30 @@ class TestOpenRouterProvider:
         sent = calls[0].kwargs["json"]
         assert sent["model"] == "openrouter/free"
         assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
+
+    def test_tool_names_are_wire_safe_and_mapped_back(self):
+        import re
+
+        from ai.providers.openrouter import OpenRouterProvider
+
+        provider = OpenRouterProvider()
+        body = _ok_body()
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = "browser__open"
+        result, calls = _complete(provider, [(200, body)])
+        sent_names = [t["function"]["name"] for t in calls[0].kwargs["json"]["tools"]]
+        assert sent_names and all(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", n) for n in sent_names)
+        assert "browser__open" in sent_names
+        assert result.message.tool_calls[0].name == "browser.open"
+
+    def test_prompt_tool_names_rewritten_to_wire_names(self):
+        from ai.providers.openrouter import OpenRouterProvider
+
+        provider = OpenRouterProvider()
+        payload = provider._to_provider_request(
+            [ChatMessage(role="system", content="Use browser.open then registration.mark_complete.")],
+            build_tool_definitions(),
+        )
+        assert payload["messages"][0]["content"] == "Use browser__open then registration__mark_complete."
 
     def test_empty_tool_arguments_become_empty_dict(self):
         from ai.providers.openrouter import OpenRouterProvider

@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     "apps.ai_agent",
     "apps.accounts",
     "apps.audit",
+    "apps.profiles",
+    "apps.mcp_server",
 ]
 
 MIDDLEWARE = [
@@ -127,6 +129,10 @@ REST_FRAMEWORK = {
         "registration_jobs": "10/hour",
         # The live browser view polls about once a second while it is open.
         "live_view": "300/min",
+        # External AI clients calling the MCP endpoint.
+        "mcp": "120/min",
+        # Connecting a mailbox makes an outbound login attempt.
+        "email_connect": "10/hour",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -277,3 +283,12 @@ LOGGING = {
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
+
+# --- Email connection (Gmail sign-in) -------------------------------------------
+# Optional. Create an OAuth client (type: Web application) in Google Cloud, enable
+# the Gmail API, and add this redirect URI: <backend URL>/api/email-connection/gmail/callback/
+GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID", default="")
+GOOGLE_OAUTH_CLIENT_SECRET = env("GOOGLE_OAUTH_CLIENT_SECRET", default="")
+GOOGLE_OAUTH_REDIRECT_URI = env("GOOGLE_OAUTH_REDIRECT_URI", default="")
+# Where the browser is sent after the Google consent screen, and the base for job links in MCP replies.
+FRONTEND_URL = env("FRONTEND_URL", default="http://logindirect.vercel.app").rstrip("/")

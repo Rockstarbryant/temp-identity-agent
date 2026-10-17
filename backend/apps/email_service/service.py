@@ -14,10 +14,15 @@ from apps.common.encryption import encrypt_secret
 from apps.email_service.models import EmailMessage, TemporaryEmail
 from apps.email_service.providers.base import EmailProvider
 from apps.email_service.providers.mailtm import MailTmProvider
+from apps.email_service.providers.user_gmail import GmailUserMailboxProvider
+from apps.email_service.providers.user_imap import ImapUserMailboxProvider
 from apps.identities.models import TemporaryIdentity
 
 _PROVIDERS: dict[str, type[EmailProvider]] = {
     "mailtm": MailTmProvider,
+    # The user's own inbox (permanent accounts).
+    "imap": ImapUserMailboxProvider,
+    "gmail": GmailUserMailboxProvider,
 }
 
 
@@ -55,6 +60,39 @@ def create_mailbox_for_identity(identity: TemporaryIdentity) -> TemporaryEmail:
     identity.email = provisioned.address
     identity.save(update_fields=["email", "updated_at"])
 
+    return mailbox
+
+
+def attach_user_mailbox(identity: TemporaryIdentity, connection) -> TemporaryEmail:
+    """
+    Point `identity` at the user's own connected inbox. Only mail arriving from
+    now on is visible to the agent (a baseline is recorded here).
+    """
+    import json
+    import time
+
+    from apps.email_service.providers.user_imap import current_uid_baseline, open_imap
+
+    if connection.kind == "imap":
+        imap = open_imap(connection.imap_host, connection.imap_port, connection.address, connection.get_secret())
+        try:
+            baseline = {"baseline_uid": current_uid_baseline(imap)}
+        finally:
+            try:
+                imap.logout()
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        baseline = {"baseline_ts": int(time.time()) - 5}
+
+    mailbox = TemporaryEmail(
+        identity=identity, provider=connection.kind, address=connection.address,
+        expires_at=identity.expires_at,
+    )
+    mailbox.set_credential(json.dumps({"connection_id": str(connection.id), **baseline}))
+    mailbox.save()
+    identity.email = connection.address
+    identity.save(update_fields=["email", "updated_at"])
     return mailbox
 
 

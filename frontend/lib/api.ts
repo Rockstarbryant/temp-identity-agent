@@ -101,7 +101,7 @@ export interface RegistrationStep {
 export type JobState =
   | "queued" | "starting" | "opening_site" | "analyzing" | "identity_created"
   | "filling_form" | "submitting" | "waiting_for_email" | "verifying"
-  | "completed" | "captcha_required" | "human_action_required"
+  | "waiting_for_user" | "completed" | "captcha_required" | "human_action_required"
   | "failed" | "cancelled" | "expired";
 
 export interface RegistrationJob {
@@ -116,13 +116,36 @@ export interface RegistrationJob {
   model: string;
   /** Vault entry created by a completed job. */
   account_id: string | null;
+  kind: "registration" | "form";
+  source: "web" | "mcp";
+  account_mode: "temporary" | "permanent";
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
 }
 
+export interface PendingQuestion {
+  id: string;
+  key: string;
+  question: string;
+  options: string[];
+  sensitive: boolean;
+  created_at: string;
+}
+
 export interface RegistrationJobDetail extends RegistrationJob {
   steps: RegistrationStep[];
+  pending_question: PendingQuestion | null;
+  /** Form jobs: {submitted: [{question, answer}], note}. MCP jobs: {summary, data}. */
+  result: {
+    submitted?: { question: string; answer: string }[];
+    note?: string;
+    summary?: string;
+    data?: Record<string, unknown>;
+  };
+  auth_check: { email_password?: boolean; methods?: string[]; notes?: string };
+  target_url: string;
+  goal: string;
 }
 
 export interface TemporaryAccountSummary {
@@ -134,9 +157,11 @@ export interface TemporaryAccountSummary {
   revealed_at: string | null;
   expires_at: string;
   created_at: string;
+  permanent: boolean;
 }
 
 export interface RevealedCredentials {
+  permanent?: boolean;
   email: string;
   username: string;
   password: string;
@@ -243,6 +268,13 @@ export async function sendLiveInput(id: string, event: LiveInput) {
   });
 }
 
+export async function answerQuestion(jobId: string, questionId: string, body: { answer?: string; skip?: boolean; remember?: boolean }) {
+  return request<void>(`/api/registration-jobs/${jobId}/questions/${questionId}/answer/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function cancelRegistrationJob(id: string) {
   return request<RegistrationJob>(`/api/registration-jobs/${id}/cancel/`, { method: "POST" });
 }
@@ -276,3 +308,105 @@ export async function revealCredentials(id: string) {
 export async function deleteAccount(id: string) {
   return request<void>(`/api/accounts/${id}/`, { method: "DELETE" });
 }
+
+
+// --- Settings: preferences, saved details, email, API keys -----------------------
+
+export type AccountMode = "temporary" | "permanent";
+
+export interface StandardField {
+  key: string;
+  label: string;
+  type: string;
+}
+
+export interface ProfileEntry {
+  key: string;
+  label: string;
+  value: string;
+  source: "settings" | "answer";
+}
+
+export interface ProfileData {
+  account_mode: AccountMode;
+  standard_fields: StandardField[];
+  entries: ProfileEntry[];
+}
+
+export interface EmailConnection {
+  connected: boolean;
+  kind: "imap" | "gmail" | null;
+  address: string | null;
+  imap_host: string | null;
+  last_checked_at: string | null;
+  last_error: string;
+  gmail_oauth_available: boolean;
+  ok?: boolean;
+}
+
+export interface ApiKeySummary {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export async function getProfile() {
+  return request<ProfileData>("/api/profile/");
+}
+
+export async function setAccountMode(account_mode: AccountMode) {
+  return request<{ account_mode: AccountMode }>("/api/preferences/", {
+    method: "PATCH",
+    body: JSON.stringify({ account_mode }),
+  });
+}
+
+export async function saveProfileEntry(key: string, value: string, label?: string) {
+  return request<ProfileEntry | undefined>(`/api/profile/entries/${encodeURIComponent(key)}/`, {
+    method: "PUT",
+    body: JSON.stringify({ value, label }),
+  });
+}
+
+export async function deleteProfileEntry(key: string) {
+  return request<void>(`/api/profile/entries/${encodeURIComponent(key)}/`, { method: "DELETE" });
+}
+
+export async function getEmailConnection() {
+  return request<EmailConnection>("/api/email-connection/");
+}
+
+export async function connectImap(address: string, password: string, host: string) {
+  return request<EmailConnection>("/api/email-connection/", {
+    method: "PUT",
+    body: JSON.stringify({ address, password, host }),
+  });
+}
+
+export async function testEmailConnection() {
+  return request<EmailConnection>("/api/email-connection/test/", { method: "POST" });
+}
+
+export async function disconnectEmail() {
+  return request<void>("/api/email-connection/", { method: "DELETE" });
+}
+
+export async function getGmailAuthorizeUrl() {
+  return request<{ url: string }>("/api/email-connection/gmail/authorize/");
+}
+
+export async function listApiKeys() {
+  return request<ApiKeySummary[]>("/api/api-keys/");
+}
+
+export async function createApiKey(name: string) {
+  return request<ApiKeySummary & { key: string }>("/api/api-keys/", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function revokeApiKey(id: string) {
+  return request<void>(`/api/api-keys/${id}/`, { method: "DELETE" });
+}
+
+export { API_URL };

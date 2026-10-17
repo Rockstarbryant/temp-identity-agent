@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from ai.schemas import ToolDefinition
 from apps.ai_agent.context import AgentContext
 from apps.browser import actions as browser_actions
+from apps.ai_agent import questions
 from apps.browser.page_inspector import inspect_page
 from apps.common.exceptions import RegistrationFailedError
 from apps.email_service import service as email_service
@@ -62,6 +63,45 @@ class EmailWaitForVerificationArgs(BaseModel):
     timeout_seconds: int = Field(default=60, ge=1, le=300)
 
 
+class ProfileGetArgs(BaseModel):
+    keys: list[str] = Field(
+        default_factory=list,
+        description="Detail keys to fetch, e.g. ['phone', 'county']. Omit to see which details are saved (names only, no values).",
+    )
+
+
+class UserAskArgs(BaseModel):
+    question: str = Field(..., min_length=3, max_length=500, description="A clear, specific question for the user.")
+    field_key: str = Field(
+        default="",
+        max_length=60,
+        description="snake_case name for this detail (e.g. 'phone', 'home_county') so it can be saved and reused. Reuse standard keys when they fit.",
+    )
+    options: list[str] = Field(default_factory=list, description="If the form offers fixed choices, list them.")
+    sensitive: bool = Field(default=False, description="True for IDs or similar; the answer is then not shown in the job timeline.")
+
+
+class AuthMethodsArgs(BaseModel):
+    email_password: bool = Field(..., description="True only if the site lets you sign up / log in with an email address and password.")
+    methods: list[str] = Field(default_factory=list, description="Everything offered, e.g. ['email_password', 'google', 'facebook'].")
+    notes: str = Field(default="", max_length=500)
+
+
+class FormAnswer(BaseModel):
+    question: str = Field(..., max_length=300)
+    answer: str = Field(..., max_length=1000)
+
+
+class FormCompleteArgs(BaseModel):
+    submitted: list[FormAnswer] = Field(..., min_length=1, description="Every question and the answer you submitted.")
+    note: str = Field(default="", max_length=500, description="Anything the user should know (e.g. the confirmation message).")
+
+
+class DataResultArgs(BaseModel):
+    summary: str = Field(..., min_length=1, max_length=1000, description="One or two sentences on what was found.")
+    data: dict[str, Any] = Field(default_factory=dict, description="The extracted information as key/value pairs.")
+
+
 class RegistrationReasonArgs(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000)
 
@@ -72,6 +112,16 @@ def _require_session(ctx: AgentContext) -> Any:
     if ctx.session is None:
         raise RegistrationFailedError("No active browser session — call browser.open first.")
     return ctx.session
+
+
+def _require_auth_check(ctx: AgentContext) -> None:
+    """MCP jobs must establish that the site supports email+password sign-in before anything is filled in."""
+    job = ctx.job
+    if job.source == RegistrationJob.Source.MCP and job.kind == RegistrationJob.Kind.REGISTRATION and not job.auth_check:
+        raise RegistrationFailedError(
+            "Before registering, find out how this site lets people sign up or log in, then call "
+            "site.report_auth_methods. Do not fill in any form until you have."
+        )
 
 
 def _handle_browser_open(ctx: AgentContext, args: BrowserOpenArgs) -> dict:
@@ -90,11 +140,13 @@ def _handle_browser_click(ctx: AgentContext, args: BrowserClickArgs) -> dict:
 
 
 def _handle_browser_type(ctx: AgentContext, args: BrowserTypeArgs) -> dict:
+    _require_auth_check(ctx)
     result = browser_actions.browser_type(_require_session(ctx), args.element_id, args.text)
     return result.model_dump()
 
 
 def _handle_browser_select(ctx: AgentContext, args: BrowserSelectArgs) -> dict:
+    _require_auth_check(ctx)
     result = browser_actions.browser_select(_require_session(ctx), args.element_id, args.value)
     return result.model_dump()
 
@@ -109,7 +161,35 @@ def _handle_browser_go_back(ctx: AgentContext, args: NoArgs) -> dict:
     return result.model_dump()
 
 
+def _profile_values(user) -> dict[str, str]:
+    from apps.profiles.models import ProfileEntry
+
+    return {e.key: e.get_value() for e in ProfileEntry.objects.filter(user=user)}
+
+
 def _handle_identity_create(ctx: AgentContext, args: NoArgs) -> dict:
+    _require_auth_check(ctx)
+    if ctx.job.kind == RegistrationJob.Kind.FORM:
+        raise RegistrationFailedError("This job fills in a form; it doesn't create an account. Use profile.get and user.ask instead.")
+
+    if ctx.job.account_mode == RegistrationJob.AccountMode.PERMANENT:
+        from apps.profiles.models import EmailConnection
+
+        connection = EmailConnection.objects.filter(user=ctx.job.user).first()
+        if connection is None:
+            raise RegistrationFailedError(
+                "This is a permanent-account job but no email is connected. Call registration.mark_human_action_required "
+                "asking the user to connect their email in Settings."
+            )
+        identity = identity_service.create_permanent_identity(ctx.job.user, _profile_values(ctx.job.user))
+        ctx.job.identity = identity
+        ctx.job.save(update_fields=["identity", "updated_at"])
+        mailbox = email_service.attach_user_mailbox(identity, connection)
+        ctx.identity = identity
+        ctx.mailbox = mailbox
+        return {"id": str(identity.id), "name": identity.name, "username": identity.username,
+                "email": identity.email, "permanent": True}
+
     identity = identity_service.create_temporary_identity(ctx.job.user)
     ctx.job.identity = identity
     ctx.job.save(update_fields=["identity", "updated_at"])
@@ -172,11 +252,73 @@ def _handle_email_wait_for_verification(ctx: AgentContext, args: EmailWaitForVer
     }
 
 
+def _handle_browser_read_text(ctx: AgentContext, args: NoArgs) -> dict:
+    page = _require_session(ctx).page
+    text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+    return {"url": page.url, "title": page.title(), "text": text[:8000], "truncated": len(text) > 8000}
+
+
+def _handle_profile_get(ctx: AgentContext, args: ProfileGetArgs) -> dict:
+    from apps.profiles.models import ProfileEntry
+
+    entries = {e.key: e for e in ProfileEntry.objects.filter(user=ctx.job.user)}
+    if not args.keys:
+        return {"saved_details": [{"key": k, "label": e.label} for k, e in entries.items()]}
+    found = {k: entries[k].get_value() for k in args.keys if k in entries}
+    missing = [k for k in args.keys if k not in entries]
+    return {"values": found, "not_saved": missing}
+
+
+def _handle_user_ask(ctx: AgentContext, args: UserAskArgs) -> dict:
+    return questions.ask_user(ctx.job, args.question, key=args.field_key, options=args.options, sensitive=args.sensitive)
+
+
+def _handle_site_report_auth_methods(ctx: AgentContext, args: AuthMethodsArgs) -> dict:
+    ctx.job.auth_check = {"email_password": args.email_password, "methods": args.methods[:10], "notes": args.notes}
+    if args.email_password:
+        ctx.job.save(update_fields=["auth_check", "updated_at"])
+        return {"proceed": True}
+    social = ", ".join(m for m in args.methods if m != "email_password") or "social sign-in only"
+    ctx.job.state = RegistrationJob.State.FAILED
+    ctx.job.error_code = "AUTH_METHOD_UNSUPPORTED"
+    ctx.job.error_message = (
+        f"This site doesn't offer sign-up or login with an email and password ({social}). "
+        "This service can only register with email and password, so it can't use social sign-in."
+    )
+    ctx.job.completed_at = timezone.now()
+    ctx.job.save(update_fields=["auth_check", "state", "error_code", "error_message", "completed_at", "updated_at"])
+    return {"proceed": False, "reason": ctx.job.error_message}
+
+
+def _handle_form_complete(ctx: AgentContext, args: FormCompleteArgs) -> dict:
+    ctx.job.result = {"submitted": [a.model_dump() for a in args.submitted], "note": args.note}
+    ctx.job.state = RegistrationJob.State.COMPLETED
+    ctx.job.completed_at = timezone.now()
+    ctx.job.save(update_fields=["result", "state", "completed_at", "updated_at"])
+    return {"state": ctx.job.state}
+
+
+def _handle_data_submit_result(ctx: AgentContext, args: DataResultArgs) -> dict:
+    import json
+
+    if len(json.dumps(args.data, default=str)) > 20000:
+        raise RegistrationFailedError("The data is too large (20,000 characters max). Summarize it.")
+    ctx.job.result = {"summary": args.summary, "data": args.data}
+    ctx.job.save(update_fields=["result", "updated_at"])
+    return {"saved": True}
+
+
 def _handle_registration_get_status(ctx: AgentContext, args: NoArgs) -> dict:
     return {"state": ctx.job.state, "steps_taken": ctx.job.steps.count()}
 
 
 def _handle_registration_mark_complete(ctx: AgentContext, args: NoArgs) -> dict:
+    if ctx.job.goal and not ctx.job.result:
+        raise RegistrationFailedError(
+            "The user asked you to extract information. Call data.submit_result with it before marking the job complete."
+        )
+    if ctx.job.kind == RegistrationJob.Kind.FORM and not ctx.job.result:
+        raise RegistrationFailedError("Call form.complete with the questions and answers you submitted.")
     ctx.job.state = RegistrationJob.State.COMPLETED
     ctx.job.completed_at = timezone.now()
     ctx.job.save(update_fields=["state", "completed_at", "updated_at"])
@@ -237,6 +379,12 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         ToolSpec("browser.select", "Select an option in a <select> by its element_id.", BrowserSelectArgs, _handle_browser_select),
         ToolSpec("browser.scroll", "Scroll the page up or down.", BrowserScrollArgs, _handle_browser_scroll),
         ToolSpec("browser.go_back", "Navigate back to the previous page.", NoArgs, _handle_browser_go_back),
+        ToolSpec("browser.read_text", "Read the visible text of the current page (questions, descriptions, results).", NoArgs, _handle_browser_read_text),
+        ToolSpec("profile.get", "See which details the user has saved (no keys), or fetch values for specific keys.", ProfileGetArgs, _handle_profile_get),
+        ToolSpec("user.ask", "Ask the user for a detail you don't have. Waits for their answer. Never invent personal data; ask.", UserAskArgs, _handle_user_ask),
+        ToolSpec("site.report_auth_methods", "Report whether the site supports sign-up/login with email and password.", AuthMethodsArgs, _handle_site_report_auth_methods),
+        ToolSpec("form.complete", "After submitting a form: report every question and answer, and finish the job.", FormCompleteArgs, _handle_form_complete),
+        ToolSpec("data.submit_result", "Save the information you extracted for the requester.", DataResultArgs, _handle_data_submit_result),
         ToolSpec("identity.create", "Generate a new temporary identity and mailbox for this job.", NoArgs, _handle_identity_create),
         ToolSpec("identity.get", "Get the current job's temporary identity, including its password.", NoArgs, _handle_identity_get),
         ToolSpec("email.get_mailbox", "Get the current job's temporary mailbox address.", NoArgs, _handle_email_get_mailbox),

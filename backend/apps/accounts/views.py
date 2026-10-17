@@ -22,7 +22,7 @@ class TemporaryAccountListView(generics.ListAPIView):
 
     def get_queryset(self):
         return TemporaryAccount.objects.filter(job__user=self.request.user).select_related(
-            "identity", "website"
+            "identity", "website", "job"
         )
 
 
@@ -39,7 +39,7 @@ class TemporaryAccountDetailView(generics.RetrieveDestroyAPIView):
 
     def get_queryset(self):
         return TemporaryAccount.objects.filter(job__user=self.request.user).select_related(
-            "identity", "website"
+            "identity", "website", "job"
         )
 
     def perform_destroy(self, account):
@@ -77,7 +77,7 @@ class RevealCredentialsView(APIView):
         from django.shortcuts import get_object_or_404
 
         account = get_object_or_404(
-            TemporaryAccount.objects.select_related("identity", "website"),
+            TemporaryAccount.objects.select_related("identity", "website", "job"),
             id=self.kwargs["pk"], job__user=self.request.user,
         )
         self.check_object_permissions(self.request, account)
@@ -102,5 +102,6 @@ class RevealCredentialsView(APIView):
             "password": account.identity.get_password(),
             "domain": account.website.domain,
             "expires_at": account.identity.expires_at,
+            "permanent": account.job.account_mode == "permanent",
         }).data
         return Response(data, status=status.HTTP_200_OK)

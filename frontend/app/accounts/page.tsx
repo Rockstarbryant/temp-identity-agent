@@ -40,7 +40,7 @@ export default function AccountsPage() {
                   </div>
                 </div>
                 <span className="text-xs text-black/40">
-                  Expires {new Date(acct.expires_at).toLocaleDateString()}
+                  {acct.permanent ? "Permanent account" : `Expires ${new Date(acct.expires_at).toLocaleDateString()}`}
                 </span>
               </Link>
             </li>
@@ -50,3 +50,4 @@ export default function AccountsPage() {
     </div>
   );
 }
+

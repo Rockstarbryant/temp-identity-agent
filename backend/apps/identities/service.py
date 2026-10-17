@@ -65,3 +65,30 @@ def revoke_identity(identity: TemporaryIdentity) -> TemporaryIdentity:
     identity.status = TemporaryIdentity.Status.REVOKED
     identity.save(update_fields=["status", "updated_at"])
     return identity
+
+
+PERMANENT_RETENTION_DAYS = 3650
+
+
+def create_permanent_identity(user, profile: dict[str, str] | None = None) -> TemporaryIdentity:
+    """
+    Identity for a permanent account: the user's real name (when saved in their
+    profile), a generated username and password, and no practical expiry. The
+    email is attached afterwards by email_service.attach_user_mailbox.
+    """
+    profile = profile or {}
+    name = (
+        profile.get("full_name")
+        or " ".join(p for p in (profile.get("first_name"), profile.get("last_name")) if p)
+        or generate_display_name()
+    )
+    identity = TemporaryIdentity(
+        user=user,
+        name=name[:150],
+        username=(profile.get("username") or generate_username())[:150],
+        email="",
+        expires_at=timezone.now() + timedelta(days=PERMANENT_RETENTION_DAYS),
+    )
+    identity.set_password(generate_password_from_settings())
+    identity.save()
+    return identity

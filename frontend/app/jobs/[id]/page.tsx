@@ -13,6 +13,7 @@ import { useCachedData } from "@/lib/useCachedData";
 import StateBadge from "@/components/StateBadge";
 import AiBadge from "@/components/AiBadge";
 import LiveBrowser from "@/components/LiveBrowser";
+import QuestionCard from "@/components/QuestionCard";
 import {
   CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight, RotateCcw, Trash2,
   Copy, Check, Eye, KeyRound,
@@ -37,6 +38,12 @@ const FALLBACK_LABELS: Record<string, string> = {
   "email.list_messages": "Checked for new emails",
   "email.read_message": "Read a message",
   "email.wait_for_verification": "Waited for a verification email",
+  "browser.read_text": "Read the text on the page",
+  "profile.get": "Looked up your saved details",
+  "user.ask": "Asked you for a detail",
+  "site.report_auth_methods": "Checked how the site lets you sign in",
+  "form.complete": "Submitted the form",
+  "data.submit_result": "Saved the extracted information",
   "registration.get_status": "Checked job status",
   "registration.mark_complete": "Marked registration complete",
   "registration.mark_failed": "Registration could not be completed",
@@ -213,8 +220,46 @@ export default function JobDetailPage() {
           </div>
           <StateBadge state={job.state} />
         </div>
-        <div className="flex min-w-0"><AiBadge provider={job.provider} model={job.model} /></div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <AiBadge provider={job.provider} model={job.model} />
+          {job.kind === "form" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Form</span>}
+          {job.kind === "registration" && job.account_mode === "permanent" && (
+            <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Permanent account</span>
+          )}
+          {job.source === "mcp" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">From an AI client</span>}
+        </div>
       </div>
+
+      {job.pending_question && job.state === "waiting_for_user" && (
+        <QuestionCard key={job.pending_question.id} jobId={id} question={job.pending_question} onDone={() => refresh()} />
+      )}
+
+      {job.state === "completed" && job.kind === "form" && job.result?.submitted && (
+        <div className="space-y-3 rounded-md border border-green-200 bg-green-50 p-4">
+          <div className="flex items-center gap-2 font-medium text-green-800">
+            <CheckCircle2 className="h-4 w-4" /> Form submitted. This is what was sent:
+          </div>
+          <dl className="divide-y divide-green-200/70 rounded-md bg-white text-sm">
+            {job.result.submitted.map((a, i) => (
+              <div key={i} className="grid gap-0.5 px-3 py-2 sm:grid-cols-[40%_1fr] sm:gap-3">
+                <dt className="text-black/50">{a.question}</dt>
+                <dd className="break-words">{a.answer}</dd>
+              </div>
+            ))}
+          </dl>
+          {job.result.note && <p className="text-xs text-green-800">{job.result.note}</p>}
+        </div>
+      )}
+
+      {job.state === "completed" && job.kind === "registration" && job.result?.summary && (
+        <div className="space-y-2 rounded-md border border-black/10 bg-white p-4 text-sm">
+          <p className="font-medium">Extracted information</p>
+          <p className="text-black/70">{job.result.summary}</p>
+          {job.result.data && Object.keys(job.result.data).length > 0 && (
+            <pre className="overflow-x-auto rounded-md bg-black/[0.04] p-3 text-xs">{JSON.stringify(job.result.data, null, 2)}</pre>
+          )}
+        </div>
+      )}
 
       {job.state === "completed" && job.account_id && (
         <CredentialsCard accountId={job.account_id} domain={job.domain} />

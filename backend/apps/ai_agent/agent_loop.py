@@ -18,7 +18,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from ai.router import get_ai_provider
-from ai.prompts.system_prompt import SYSTEM_PROMPT
+from ai.prompts.system_prompt import build_system_prompt
 from ai.schemas import ChatMessage
 from apps.ai_agent.context import AgentContext
 from apps.ai_agent.dispatcher import dispatch_tool_call
@@ -38,6 +38,32 @@ _NO_TOOL_CALL_NUDGE = (
 )
 
 
+def compress_old_snapshots(messages: list[ChatMessage]) -> None:
+    """
+    Every browser tool result carries a full page snapshot. Keeping all of them
+    makes the prompt balloon on long forms, so only the newest snapshot stays in
+    full; earlier ones are reduced to the page URL/title (the agent re-inspects
+    before acting anyway).
+    """
+    indexes: list[int] = []
+    for i, m in enumerate(messages):
+        if m.role == "tool" and '"snapshot"' in (m.content or ""):
+            indexes.append(i)
+    for i in indexes[:-1]:
+        try:
+            data = json.loads(messages[i].content)
+            snap = (data.get("result") or {}).get("snapshot")
+            if not isinstance(snap, dict) or isinstance(snap.get("elements"), str):
+                continue
+            data["result"]["snapshot"] = {
+                "url": snap.get("url", ""), "title": snap.get("title", ""),
+                "elements": "[omitted: superseded by a newer snapshot — inspect again if you need it]",
+            }
+            messages[i] = messages[i].model_copy(update={"content": json.dumps(data)})
+        except (ValueError, AttributeError, TypeError):
+            continue
+
+
 class AgentRunner:
     """Runs one RegistrationJob's agent loop to completion or a stopping state."""
 
@@ -53,7 +79,9 @@ class AgentRunner:
     def run(self, target_url: str, resume: bool = False) -> RegistrationJob:
         deadline = time.monotonic() + self.job.timeout_seconds
 
-        if resume:
+        if self.job.kind == RegistrationJob.Kind.FORM and not resume:
+            instruction = f"Fill in and submit the form at {target_url}."
+        elif resume:
             instruction = (
                 f"Resume registering an account on {target_url}. A human has just "
                 f"completed the manual step that was blocking you. Re-inspect the "
@@ -62,12 +90,12 @@ class AgentRunner:
             )
         else:
             instruction = (
-                f"Register a new temporary account on {target_url}. "
-                f"Start by creating an identity, then open the site."
+                f"Register a new {'permanent' if self.job.account_mode == 'permanent' else 'temporary'} "
+                f"account on {target_url}. Start by creating an identity, then open the site."
             )
 
         messages = [
-            ChatMessage(role="system", content=SYSTEM_PROMPT),
+            ChatMessage(role="system", content=build_system_prompt(self.job)),
             ChatMessage(role="user", content=instruction),
         ]
 
@@ -91,6 +119,7 @@ class AgentRunner:
                 if self.job.state in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
                     break
 
+                compress_old_snapshots(messages)
                 completion = self.provider.complete(messages, self.tools)
                 ensure_db_connection()  # the LLM call can outlast the DB's idle timeout
                 messages.append(completion.message)
@@ -120,6 +149,9 @@ class AgentRunner:
                     )
                     answered.add(tool_call.id)
                     step_index += 1
+                    if tool_call.name == "user.ask":
+                        # Time spent waiting for the user doesn't count against the job's budget.
+                        deadline = time.monotonic() + self.job.timeout_seconds
                     self._publish_frame(session)
 
                     if self.job.state in RegistrationJob.RESUMABLE_STATES:

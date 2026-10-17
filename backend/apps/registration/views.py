@@ -1,8 +1,5 @@
-from urllib.parse import urlparse
-
 from django.utils import timezone
 from rest_framework import generics, permissions, status
-from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -11,7 +8,8 @@ from apps.audit.models import AuditLog
 from apps.browser import live_view
 from apps.common.exceptions import TempIdentityAgentError
 from apps.common.permissions import IsOwner
-from apps.registration.models import RegistrationJob, TargetWebsite
+from apps.registration.jobs import create_job
+from apps.registration.models import AgentQuestion, RegistrationJob
 from apps.registration.serializers import (
     LiveInputSerializer,
     RegistrationJobCreateSerializer,
@@ -23,19 +21,13 @@ from apps.registration.tasks import resume_registration_job_task, run_registrati
 
 class RegistrationJobListCreateView(generics.ListCreateAPIView):
     """
-    GET  /api/registration-jobs/  — the user's own jobs  (no special throttle)
+    GET  /api/registration-jobs/  — the user's own jobs
     POST /api/registration-jobs/  — {"url": "..."} -> creates + enqueues a job
     """
 
     permission_classes = [permissions.IsAuthenticated]
-    # Only apply the tight registration_jobs throttle on POST (create).
-    # GET (list) falls back to the normal user rate limit, same as settings / vault.
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = "registration_jobs"
-
-    def get_throttles(self):
-        if self.request.method == "POST":
-            return [ScopedRateThrottle()]
-        return []
 
     def get_queryset(self):
         return (
@@ -49,25 +41,7 @@ class RegistrationJobListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        url = serializer.validated_data["url"]
-        domain = urlparse(url).hostname
-        if not domain:
-            raise ValidationError({"url": "Could not determine a domain from this URL."})
-
-        target_website, _ = TargetWebsite.objects.get_or_create(
-            domain=domain, defaults={"registration_url": url}
-        )
-        job = RegistrationJob.objects.create(user=request.user, target_website=target_website)
-
-        AuditLog.objects.create(
-            user=request.user, action="job.created", resource_type="RegistrationJob",
-            resource_id=str(job.id), metadata={"domain": domain},
-        )
-        run_registration_job_task.delay(str(job.id))
-        job.refresh_from_db()  # the task may have already run (sync/eager) or a worker
-                                 # may be racing us — always return the current DB state,
-                                 # never the pre-dispatch in-memory object.
-
+        job = create_job(request.user, serializer.validated_data["url"])
         return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
 
@@ -130,13 +104,11 @@ class RegistrationJobRetryView(APIView):
                 {"detail": f"Only failed, cancelled or expired jobs can be retried (this one is {old.state!r})."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        job = RegistrationJob.objects.create(user=request.user, target_website=old.target_website)
-        AuditLog.objects.create(
-            user=request.user, action="job.retried", resource_type="RegistrationJob",
-            resource_id=str(job.id), metadata={"retry_of": str(old.id), "domain": old.target_website.domain},
+        job = create_job(
+            request.user, old.target_url or old.target_website.registration_url,
+            source=old.source, goal=old.goal, account_mode=old.account_mode, kind=old.kind,
+            audit_extra={"retry_of": str(old.id)},
         )
-        run_registration_job_task.delay(str(job.id))
-        job.refresh_from_db()
         return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
 
@@ -246,6 +218,33 @@ class RegistrationJobLiveInputView(APIView):
         serializer = LiveInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         live_view.push_input(job.id, serializer.validated_data)
+        return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class RegistrationJobAnswerView(APIView):
+    """
+    POST /api/registration-jobs/{id}/questions/{qid}/answer/
+    {"answer": "...", "remember": true}  or  {"skip": true}
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk, qid):
+        from django.shortcuts import get_object_or_404
+
+        from apps.ai_agent.questions import record_answer
+
+        job = _get_owned_job_or_404(request.user, pk)
+        question = get_object_or_404(AgentQuestion, id=qid, job=job)
+        if question.status != AgentQuestion.Status.PENDING:
+            return Response({"detail": "This question has already been handled."}, status=status.HTTP_409_CONFLICT)
+        skip = bool(request.data.get("skip"))
+        answer = None if skip else str(request.data.get("answer", ""))
+        if not skip and not answer.strip():
+            return Response({"answer": "Enter an answer, or skip."}, status=status.HTTP_400_BAD_REQUEST)
+        if answer and len(answer) > 1000:
+            return Response({"answer": "Too long."}, status=status.HTTP_400_BAD_REQUEST)
+        record_answer(question, answer, remember=bool(request.data.get("remember", False)))
         return Response(status=status.HTTP_202_ACCEPTED)
 
 

@@ -76,7 +76,7 @@ export default function AccountDetailPage() {
     <div className="mx-auto max-w-md space-y-6">
       <div>
         <h1 className="text-xl font-semibold">{account.domain}</h1>
-        <p className="text-xs text-black/40">Expires {new Date(account.expires_at).toLocaleString()}</p>
+        <p className="text-xs text-black/40">{account.permanent ? "Permanent account (no expiry)" : `Expires ${new Date(account.expires_at).toLocaleString()}`}</p>
       </div>
 
       <dl className="space-y-3 rounded-md border border-black/10 p-4 text-sm">
