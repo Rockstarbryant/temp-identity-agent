@@ -125,6 +125,8 @@ REST_FRAMEWORK = {
         # Job creation launches a real browser + AI agent run — needs its
         # own, much tighter cap independent of general API usage.
         "registration_jobs": "10/hour",
+        # The live browser view polls about once a second while it is open.
+        "live_view": "300/min",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -160,11 +162,35 @@ if REDIS_URL.startswith("rediss://"):
         "ssl_cert_reqs": ssl.CERT_REQUIRED,
     }
 
+# Shared cache. The web process and the Celery worker are separate processes, so
+# anything they exchange (live browser frames, API throttle counters) has to live
+# in Redis; the default per-process memory cache can't be shared between them.
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "tia",
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+    }
+}
+
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = env.int("MAX_JOB_DURATION_SECONDS", default=300)
+# While a job is paused for a CAPTCHA / manual step, the worker keeps its browser
+# open for up to this long so the user can finish it from the live view.
+# 0 disables the live hand-off (the job just pauses and Resume starts afresh).
+HUMAN_ASSIST_TIMEOUT_SECONDS = env.int("HUMAN_ASSIST_TIMEOUT_SECONDS", default=300)
+LIVE_VIEW_TICK_SECONDS = env.float("LIVE_VIEW_TICK_SECONDS", default=0.6)
+# Size of the agent's browser window. The live view scales it to fit the screen.
+BROWSER_VIEWPORT_WIDTH = env.int("BROWSER_VIEWPORT_WIDTH", default=1024)
+BROWSER_VIEWPORT_HEIGHT = env.int("BROWSER_VIEWPORT_HEIGHT", default=768)
+
+# The hard task limit must outlast the job budget plus any time spent waiting for a human.
+CELERY_TASK_TIME_LIMIT = (
+    env.int("MAX_JOB_DURATION_SECONDS", default=300) + HUMAN_ASSIST_TIMEOUT_SECONDS + 60
+)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # --- Celery beat schedule (periodic cleanup) ----------------------------------

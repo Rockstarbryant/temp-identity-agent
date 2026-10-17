@@ -152,7 +152,7 @@ services:
           envVarKey: MAX_JOB_DURATION_SECONDS
       - key: REQUIREMENTS_FILE
         value: production.txt
-    dockerCommand: celery -A config worker -l info --concurrency=1
+    dockerCommand: celery -A config worker -l info --concurrency=2
 
   # ---------------------------------------------------------------------------
   # Celery beat (periodic cleanup)

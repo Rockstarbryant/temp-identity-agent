@@ -11,10 +11,10 @@ from pathlib import Path
 
 from django.conf import settings
 from django.utils import timezone
-from playwright.sync_api import Browser, Page, Playwright, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
 from apps.browser.models import BrowserSession
-from apps.common.exceptions import BrowserError
+from apps.common.exceptions import BrowserError, UnsafeURLError
 from apps.common.url_safety import validate_url
 from apps.registration.models import RegistrationJob
 
@@ -44,6 +44,8 @@ class ManagedBrowserSession:
         self.headless = headless
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._host_ok: dict[str, bool] = {}
         self.page: Page | None = None
         self.db_session: BrowserSession | None = None
 
@@ -54,7 +56,16 @@ class ManagedBrowserSession:
         try:
             self._playwright = sync_playwright().start()
             self._browser = self._playwright.chromium.launch(headless=self.headless)
-            self.page = self._browser.new_page()
+            self._context = self._browser.new_context(
+                viewport={
+                    "width": settings.BROWSER_VIEWPORT_WIDTH,
+                    "height": settings.BROWSER_VIEWPORT_HEIGHT,
+                }
+            )
+            # The user can now drive this browser from the live view, so every
+            # request (not just the agent's own navigations) is SSRF-checked.
+            self._context.route("**/*", self._guard_request)
+            self.page = self._context.new_page()
         except Exception as exc:  # Playwright raises its own exception types
             self.db_session.status = BrowserSession.Status.CRASHED
             self.db_session.save(update_fields=["status", "updated_at"])
@@ -63,6 +74,8 @@ class ManagedBrowserSession:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
+            if self._context is not None:
+                self._context.close()
             if self._browser is not None:
                 self._browser.close()
             if self._playwright is not None:
@@ -76,6 +89,29 @@ class ManagedBrowserSession:
                 self.db_session.save(update_fields=["status", "ended_at", "updated_at"])
         # Don't suppress exceptions — let the caller's error handling see them.
         return False
+
+    def _guard_request(self, route) -> None:
+        """Abort requests to internal/private addresses; allow everything else."""
+        from urllib.parse import urlparse
+
+        url = route.request.url
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            route.continue_()  # data:, blob:, about: never leave the browser
+            return
+        host = (parsed.hostname or "").lower()
+        ok = self._host_ok.get(host)
+        if ok is None:
+            try:
+                validate_url(url)
+                ok = True
+            except (UnsafeURLError, Exception):  # noqa: BLE001 - DNS failure etc. => block
+                ok = False
+            self._host_ok[host] = ok
+        if ok:
+            route.continue_()
+        else:
+            route.abort("blockedbyclient")
 
     def goto(self, url: str) -> None:
         validate_url(url)

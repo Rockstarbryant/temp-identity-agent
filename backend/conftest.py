@@ -13,13 +13,17 @@ def _test_settings(settings):
     settings.GROQ_API_KEY = "test-groq-key"
     settings.GROQ_BASE_URL = "https://fake-groq.example/openai/v1"
     settings.GROQ_MODEL = "test-groq-model"
+    # Tests use in-process memory instead of Redis, and don't hold paused jobs open.
+    settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    settings.HUMAN_ASSIST_TIMEOUT_SECONDS = 0
+    settings.LIVE_VIEW_TICK_SECONDS = 0
     settings.ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
 
 
 @pytest.fixture(autouse=True)
-def _reset_throttle_cache():
+def _reset_throttle_cache(_test_settings):
     """
     DRF's rate throttles (auth: 5/min, registration_jobs: 10/hour, etc.)
     are backed by Django's cache, not the DB — pytest-django's per-test

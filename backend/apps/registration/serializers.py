@@ -85,3 +85,26 @@ class RegistrationJobDetailSerializer(RegistrationJobSerializer):
     class Meta(RegistrationJobSerializer.Meta):
         fields = RegistrationJobSerializer.Meta.fields + ["steps"]
         read_only_fields = fields
+
+
+class LiveInputSerializer(serializers.Serializer):
+    """One user action in the live browser view. Validated strictly: it is replayed in a real browser."""
+
+    type = serializers.ChoiceField(choices=["click", "type", "key", "scroll"])
+    x = serializers.IntegerField(required=False, min_value=0, max_value=10000)
+    y = serializers.IntegerField(required=False, min_value=0, max_value=10000)
+    text = serializers.CharField(required=False, allow_blank=True, max_length=300, trim_whitespace=False)
+    submit = serializers.BooleanField(required=False, default=False)
+    key = serializers.ChoiceField(
+        required=False, choices=sorted(["Enter", "Tab", "Backspace", "Delete", "Escape", "Space",
+                                        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"])
+    )
+    dy = serializers.IntegerField(required=False, min_value=-1500, max_value=1500)
+
+    def validate(self, attrs):
+        kind = attrs["type"]
+        required = {"click": ("x", "y"), "type": ("text",), "key": ("key",), "scroll": ("dy",)}[kind]
+        missing = [f for f in required if f not in attrs]
+        if missing:
+            raise serializers.ValidationError({f: "This field is required." for f in missing})
+        return attrs

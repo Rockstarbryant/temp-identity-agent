@@ -210,6 +210,39 @@ export async function resumeRegistrationJob(id: string) {
   return request<{ detail: string; id: string }>(`/api/registration-jobs/${id}/resume/`, { method: "POST" });
 }
 
+export interface LiveFrame {
+  image: string; // base64 JPEG
+  width: number;
+  height: number;
+  url: string;
+}
+
+export interface LiveView {
+  state: string;
+  /** True while the job is paused and the browser is waiting for the user. */
+  interactive: boolean;
+  seq?: number;
+  /** Null when nothing changed since `since`, or no browser frame exists yet. */
+  frame: LiveFrame | null;
+}
+
+export type LiveInput =
+  | { type: "click"; x: number; y: number }
+  | { type: "type"; text: string; submit?: boolean }
+  | { type: "key"; key: "Enter" | "Tab" | "Backspace" | "Delete" | "Escape" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" }
+  | { type: "scroll"; dy: number };
+
+export async function getLiveView(id: string, since = 0) {
+  return request<LiveView>(`/api/registration-jobs/${id}/live/?since=${since}`);
+}
+
+export async function sendLiveInput(id: string, event: LiveInput) {
+  return request<void>(`/api/registration-jobs/${id}/live/input/`, {
+    method: "POST",
+    body: JSON.stringify(event),
+  });
+}
+
 export async function cancelRegistrationJob(id: string) {
   return request<RegistrationJob>(`/api/registration-jobs/${id}/cancel/`, { method: "POST" });
 }

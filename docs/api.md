@@ -70,3 +70,15 @@ Every resource is scoped to `request.user`. Detail endpoints filter
 their queryset by owner (not just an object-level permission check) so
 a non-owner gets a clean `404`, never a `403` that would confirm the
 resource exists.
+
+
+## Live browser view
+
+- `GET /api/registration-jobs/{id}/live/?since=<seq>` — latest screenshot of the agent's browser
+  (`{state, interactive, seq, frame: {image(base64 jpeg), width, height, url} | null}`). `frame` is `null`
+  when unchanged since `since`. Polling marks a viewer as present so the worker publishes frames.
+  `interactive` is true while the job is paused and the browser is waiting for the user.
+- `POST /api/registration-jobs/{id}/live/input/` — `{type: click, x, y}` | `{type: type, text, submit?}` |
+  `{type: key, key}` | `{type: scroll, dy}`. `409` unless the browser is waiting for input.
+- `POST /api/registration-jobs/{id}/resume/` — while the worker still holds the browser this signals it to
+  continue in the same browser; otherwise it starts a fresh run as before.

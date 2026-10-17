@@ -8,10 +8,12 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.audit.models import AuditLog
+from apps.browser import live_view
 from apps.common.exceptions import TempIdentityAgentError
 from apps.common.permissions import IsOwner
 from apps.registration.models import RegistrationJob, TargetWebsite
 from apps.registration.serializers import (
+    LiveInputSerializer,
     RegistrationJobCreateSerializer,
     RegistrationJobDetailSerializer,
     RegistrationJobSerializer,
@@ -175,11 +177,70 @@ class RegistrationJobResumeView(APIView):
         except TempIdentityAgentError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
-        resume_registration_job_task.delay(str(job.id))
+        if live_view.is_holding(job.id):
+            # The worker is still holding this job's browser open: tell it to
+            # carry on in that same browser instead of starting a new one.
+            live_view.signal_done(job.id)
+        else:
+            resume_registration_job_task.delay(str(job.id))
         AuditLog.objects.create(
             user=request.user, action="job.resume_requested", resource_type="RegistrationJob", resource_id=str(job.id)
         )
         return Response({"detail": "Resume requested.", "id": str(job.id)}, status=status.HTTP_202_ACCEPTED)
+
+
+class RegistrationJobLiveView(APIView):
+    """
+    GET /api/registration-jobs/{id}/live/?since=<seq>
+
+    Latest screenshot of the agent's browser for the live view. Polling this
+    is what tells the worker someone is watching. `interactive` is true while
+    the job is paused and the user may tap/type in the browser. The image is
+    omitted when it hasn't changed since `since`.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "live_view"
+
+    def get(self, request, pk):
+        job = _get_owned_job_or_404(request.user, pk)
+        live_view.mark_viewer(job.id)
+        holding = live_view.is_holding(job.id)
+        frame = live_view.get_frame(job.id)
+        body = {"state": job.state, "interactive": holding, "frame": None}
+        if frame is not None:
+            try:
+                since = int(request.query_params.get("since", "0"))
+            except ValueError:
+                since = 0
+            body["seq"] = frame["seq"]
+            body["interactive"] = holding and bool(frame.get("interactive", True))
+            if frame["seq"] != since:
+                body["frame"] = {
+                    k: frame[k] for k in ("image", "width", "height", "url")
+                }
+        return Response(body)
+
+
+class RegistrationJobLiveInputView(APIView):
+    """POST /api/registration-jobs/{id}/live/input/ — a tap, typed text, key or scroll."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "live_view"
+
+    def post(self, request, pk):
+        job = _get_owned_job_or_404(request.user, pk)
+        if not live_view.is_holding(job.id):
+            return Response(
+                {"detail": "The browser is not waiting for input right now."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        serializer = LiveInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        live_view.push_input(job.id, serializer.validated_data)
+        return Response(status=status.HTTP_202_ACCEPTED)
 
 
 class RegistrationJobCancelView(APIView):

@@ -12,6 +12,7 @@ import { invalidate } from "@/lib/cache";
 import { useCachedData } from "@/lib/useCachedData";
 import StateBadge from "@/components/StateBadge";
 import AiBadge from "@/components/AiBadge";
+import LiveBrowser from "@/components/LiveBrowser";
 import {
   CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight, RotateCcw, Trash2,
   Copy, Check, Eye, KeyRound,
@@ -141,19 +142,19 @@ export default function JobDetailPage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [polling, setPolling] = useState(true);
 
   useEffect(() => {
     if (!isAuthenticated()) router.push(`/login?next=/jobs/${id}`);
   }, [id, router]);
 
+  // Keep polling until the job is finished. A paused job is still polled (more slowly):
+  // pressing "continue" hands it back to the live browser, so its state changes on its own.
+  const [finished, setFinished] = useState(false);
   const { data: job, refresh } = useCachedData(`job:${id}`, () => getRegistrationJob(id), {
-    refreshMs: polling ? 3000 : 0,
+    refreshMs: finished ? 0 : 3000,
   });
-
-  // Stop polling once the job reaches a stopping state.
   useEffect(() => {
-    if (job && (TERMINAL.has(job.state) || RESUMABLE.has(job.state))) setPolling(false);
+    setFinished(!!job && TERMINAL.has(job.state));
   }, [job]);
 
   async function run(action: () => Promise<void>, failMessage: string) {
@@ -171,7 +172,6 @@ export default function JobDetailPage() {
   const handleResume = () =>
     run(async () => {
       await resumeRegistrationJob(id);
-      setPolling(true);
       await refresh();
     }, "Could not resume the job.");
 
@@ -233,9 +233,8 @@ export default function JobDetailPage() {
           </div>
           <p className="mt-1 text-sm text-amber-700">{job.error_message || "A manual step is needed on the target site."}</p>
           <p className="mt-2 text-xs text-amber-700/80">
-            The agent works in its own browser on our server, so a step you complete on your own device
-            does not carry over. Resume restarts the agent in a fresh browser; if the site asks for the same
-            check again, start a new attempt or try another site.
+            The agent&apos;s browser is waiting for you. Open the live browser below, complete the step
+            (for example tick the CAPTCHA or pick the images), then press &ldquo;I&apos;m done — continue&rdquo;.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
@@ -243,10 +242,14 @@ export default function JobDetailPage() {
               className="flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Resume <ArrowRight className="h-4 w-4" />
+              I&apos;m done — continue <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         </div>
+      )}
+
+      {!TERMINAL.has(job.state) && (
+        <LiveBrowser jobId={id} needsHuman={RESUMABLE.has(job.state)} finished={false} />
       )}
 
       {job.state === "failed" && job.error_message && (
