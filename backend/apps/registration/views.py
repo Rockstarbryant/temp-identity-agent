@@ -23,13 +23,19 @@ from apps.registration.tasks import resume_registration_job_task, run_registrati
 
 class RegistrationJobListCreateView(generics.ListCreateAPIView):
     """
-    GET  /api/registration-jobs/  — the user's own jobs
+    GET  /api/registration-jobs/  — the user's own jobs  (no special throttle)
     POST /api/registration-jobs/  — {"url": "..."} -> creates + enqueues a job
     """
 
     permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
+    # Only apply the tight registration_jobs throttle on POST (create).
+    # GET (list) falls back to the normal user rate limit, same as settings / vault.
     throttle_scope = "registration_jobs"
+
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [ScopedRateThrottle()]
+        return []
 
     def get_queryset(self):
         return (

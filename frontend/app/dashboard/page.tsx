@@ -14,9 +14,12 @@ import AiBadge from "@/components/AiBadge";
 import { Plus, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 const RETRYABLE = new Set(["failed", "cancelled", "expired"]);
+
+// States that still need live updates (including paused ones waiting for the user).
 const ACTIVE = new Set([
   "queued", "starting", "opening_site", "analyzing", "identity_created",
   "filling_form", "submitting", "waiting_for_email", "verifying",
+  "captcha_required", "human_action_required",
 ]);
 
 export default function DashboardPage() {
@@ -29,11 +32,20 @@ export default function DashboardPage() {
     if (!isAuthenticated()) router.push("/login?next=/dashboard");
   }, [router]);
 
+  // First fetch (or cached data) decides whether we keep polling.
+  // Once every job is terminal, refreshMs becomes 0 and polling stops.
+  const [hasActiveJobs, setHasActiveJobs] = useState(true);
+
   const { data, loading, mutate } = useCachedData(
     "jobs",
-    async () => (await listRegistrationJobs()).results,
-    { refreshMs: 4000 }
+    async () => {
+      const results = (await listRegistrationJobs()).results;
+      setHasActiveJobs(results.some((j) => ACTIVE.has(j.state)));
+      return results;
+    },
+    { refreshMs: hasActiveJobs ? 4000 : 0 }
   );
+
   const jobs: RegistrationJob[] = data ?? [];
   const finishedCount = jobs.filter((j) => RETRYABLE.has(j.state)).length;
 
@@ -43,6 +55,8 @@ export default function DashboardPage() {
     try {
       const fresh = await retryRegistrationJob(job.id);
       invalidate("jobs");
+      // A new active job just appeared → re-enable polling
+      setHasActiveJobs(true);
       router.push(`/jobs/${fresh.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not retry the job.");
@@ -56,7 +70,11 @@ export default function DashboardPage() {
     setError(null);
     try {
       await deleteRegistrationJob(job.id);
-      mutate((prev) => (prev ?? []).filter((j) => j.id !== job.id));
+      mutate((prev) => {
+        const next = (prev ?? []).filter((j) => j.id !== job.id);
+        setHasActiveJobs(next.some((j) => ACTIVE.has(j.state)));
+        return next;
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not delete the job.");
     } finally {
@@ -70,7 +88,11 @@ export default function DashboardPage() {
     setError(null);
     try {
       await clearFinishedJobs();
-      mutate((prev) => (prev ?? []).filter((j) => !RETRYABLE.has(j.state)));
+      mutate((prev) => {
+        const next = (prev ?? []).filter((j) => !RETRYABLE.has(j.state));
+        setHasActiveJobs(next.some((j) => ACTIVE.has(j.state)));
+        return next;
+      });
     } catch {
       setError("Could not clear the list.");
     } finally {
