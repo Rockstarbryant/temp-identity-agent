@@ -21,7 +21,7 @@ def dispatch_tool_call(ctx: AgentContext, tool_call: ToolCallRequest) -> dict:
         return {"success": False, "error": f"Unknown tool {tool_call.name!r}. Not in the allowlist."}
 
     try:
-        args = spec.args_model(**tool_call.arguments)
+        args = spec.args_model(**{k: v for k, v in (tool_call.arguments or {}).items() if v is not None})
     except ValidationError as exc:
         return {"success": False, "error": f"Invalid arguments for {tool_call.name}: {exc}"}
 

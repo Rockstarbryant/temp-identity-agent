@@ -400,9 +400,32 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
 }
 
 
+def _tolerant_schema(model: type[BaseModel]) -> dict:
+    """JSON schema where optional arguments may also be null.
+
+    Models often send `"options": null` for an argument they have nothing for.
+    Some providers (Groq) validate that against the schema server-side and reject the
+    whole request with a 400, so optional properties must explicitly allow null. The
+    dispatcher drops null arguments before validating, so defaults still apply.
+    """
+    schema = model.model_json_schema()
+    required = set(schema.get("required", []))
+    for name, prop in schema.get("properties", {}).items():
+        if name in required or not isinstance(prop, dict):
+            continue
+        if "type" in prop and isinstance(prop["type"], str):
+            prop["type"] = [prop["type"], "null"]
+        elif "anyOf" in prop:
+            if not any(o.get("type") == "null" for o in prop["anyOf"] if isinstance(o, dict)):
+                prop["anyOf"].append({"type": "null"})
+        else:
+            schema["properties"][name] = {"anyOf": [prop, {"type": "null"}]}
+    return schema
+
+
 def build_tool_definitions() -> list[ToolDefinition]:
     """Convert the registry into the provider-agnostic ToolDefinition list."""
     return [
-        ToolDefinition(name=spec.name, description=spec.description, parameters=spec.args_model.model_json_schema())
+        ToolDefinition(name=spec.name, description=spec.description, parameters=_tolerant_schema(spec.args_model))
         for spec in TOOL_REGISTRY.values()
     ]
