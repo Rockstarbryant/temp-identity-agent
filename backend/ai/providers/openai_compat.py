@@ -26,10 +26,17 @@ _INVALID_NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
 
 def encode_tool_name(name: str) -> str:
-    return _INVALID_NAME_CHARS.sub("_", name.replace(".", "__"))[:64]
+    # A single underscore, not "__": some models (gpt-oss on Groq) mangle "user__ask" into a
+    # call to a tool called just "user". Decoding goes through a lookup table, so it's lossless.
+    return _INVALID_NAME_CHARS.sub("_", name)[:64]
+
+
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[._-]+", "_", name.strip().lower())
 
 
 class OpenAICompatibleProvider(AIProvider):
+    TOOL_USE_FAILED_ATTEMPTS = 3
     label = "Provider"  # used in error messages, e.g. "OpenRouter returned 429: ..."
     timeout = 60.0
     retryable_statuses: frozenset[int] = DEFAULT_RETRYABLE_STATUSES
@@ -129,6 +136,11 @@ class OpenAICompatibleProvider(AIProvider):
         """Map a name from the API back to our registry name."""
         if wire in self._tool_names:
             return self._tool_names[wire]
+        # Be forgiving about separators ("user.ask", "user__ask", "User-Ask" -> user.ask).
+        wanted = _normalize_name(wire)
+        for enc, orig in self._tool_names.items():
+            if _normalize_name(enc) == wanted:
+                return orig
         return wire
 
     def _parse_arguments(self, raw: Any) -> dict[str, Any]:
@@ -214,13 +226,20 @@ class OpenAICompatibleProvider(AIProvider):
         self, messages: list[ChatMessage], tools: list[ToolDefinition]
     ) -> CompletionResult:
         payload = self._to_provider_request(messages, tools)
-        try:
-            with httpx.Client(base_url=self.base_url, timeout=self.timeout) as client:
-                resp = client.post("/chat/completions", json=payload, headers=self._headers())
-        except httpx.HTTPError as exc:
-            raise AIProviderError(
-                f"{self.label} request failed: {exc}", retryable=True
-            ) from exc
+        resp = None
+        for attempt in range(1, self.TOOL_USE_FAILED_ATTEMPTS + 1):
+            try:
+                with httpx.Client(base_url=self.base_url, timeout=self.timeout) as client:
+                    resp = client.post("/chat/completions", json=payload, headers=self._headers())
+            except httpx.HTTPError as exc:
+                raise AIProviderError(
+                    f"{self.label} request failed: {exc}", retryable=True
+                ) from exc
+            # The model produced a malformed tool call and the API rejected it. Sampling is
+            # random, so simply asking again usually works.
+            if resp.status_code == 400 and "tool_use_failed" in resp.text and attempt < self.TOOL_USE_FAILED_ATTEMPTS:
+                continue
+            break
 
         if resp.status_code != 200:
             raise AIProviderError(

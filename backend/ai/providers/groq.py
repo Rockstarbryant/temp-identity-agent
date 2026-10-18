@@ -42,11 +42,12 @@ _EXCLUDE = ("whisper", "guard", "tts", "playai", "orpheus", "embed", "distil", "
 _CACHE_SECONDS = 3600
 
 
-def pick_model(models: list[dict]) -> str | None:
+def pick_model(models: list[dict], exclude: tuple[str, ...] = ()) -> str | None:
     """Choose the best usable chat model from Groq's /models `data` list."""
     usable = [
         m for m in models
-        if m.get("id") and m.get("active", True) and not any(x in m["id"].lower() for x in _EXCLUDE)
+        if m.get("id") and m["id"] not in exclude and m.get("active", True)
+        and not any(x in m["id"].lower() for x in _EXCLUDE)
     ]
     ids = [m["id"] for m in usable]
     for name in _PREFERRED:
@@ -65,6 +66,14 @@ class GroqProvider(OpenAICompatibleProvider):
     def __init__(self):
         api_key = getattr(settings, "GROQ_API_KEY", "")
         if not api_key:
+            # The model keeps producing malformed tool calls -> try a different model once.
+            if exc.status_code == 400 and "tool_use_failed" in str(exc) and not self._switched_for_tools:
+                self._switched_for_tools = True
+                alt = self._alternate_model()
+                if alt:
+                    logger.warning("Groq model %s keeps failing tool calls; switching to %s", self.model, alt)
+                    self.model = alt
+                    return super().complete(messages, tools)
             raise AIProviderError("GROQ_API_KEY must be set to use the groq provider.")
         super().__init__(
             api_key=api_key,
@@ -73,11 +82,23 @@ class GroqProvider(OpenAICompatibleProvider):
             model=(getattr(settings, "GROQ_MODEL", "") or "").strip(),
         )
         self._rediscovered = False
+        self._switched_for_tools = False
 
     # -- model discovery --------------------------------------------------------
 
     def _cache_key(self) -> str:
         return f"groq_model:{self.base_url}:{self.api_key[-8:]}"
+
+    def _alternate_model(self) -> str | None:
+        """Another usable chat model, different from the current one (None if there isn't one)."""
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=15.0) as client:
+                resp = client.get("/models", headers=self._headers())
+            if resp.status_code != 200:
+                return None
+            return pick_model(resp.json().get("data", []), exclude=(self.model,))
+        except (httpx.HTTPError, ValueError):
+            return None
 
     def _discover_model(self, refresh: bool = False) -> str:
         if not refresh:
@@ -115,5 +136,13 @@ class GroqProvider(OpenAICompatibleProvider):
                 if fresh != self.model:
                     logger.warning("Groq model %s unavailable; switching to %s", self.model, fresh)
                     self.model = fresh
+                    return super().complete(messages, tools)
+            # The model keeps producing malformed tool calls -> try a different model once.
+            if exc.status_code == 400 and "tool_use_failed" in str(exc) and not self._switched_for_tools:
+                self._switched_for_tools = True
+                alt = self._alternate_model()
+                if alt:
+                    logger.warning("Groq model %s keeps failing tool calls; switching to %s", self.model, alt)
+                    self.model = alt
                     return super().complete(messages, tools)
             raise
