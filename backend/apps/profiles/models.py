@@ -88,3 +88,66 @@ class EmailConnection(UUIDTimeStampedModel):
 
     def __str__(self):
         return f"{self.address} ({self.kind})"
+
+
+class ConnectedAccount(UUIDTimeStampedModel):
+    """
+    A dedicated Google or Microsoft account the user hands to the agent so it can
+    submit forms that require a sign-in. One per user and provider.
+
+    Two secrets, both encrypted at rest and never sent to the AI model:
+    - the password (optional): lets the agent sign in again when the session expires;
+    - the browser session (cookies), saved after a successful sign-in and loaded
+      only into that user's own browser, so later jobs usually skip the login.
+    """
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google"
+        MICROSOFT = "microsoft", "Microsoft"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="connected_accounts")
+    provider = models.CharField(max_length=20, choices=Provider.choices)
+    email = models.EmailField()
+    encrypted_password = models.TextField(blank=True)
+    encrypted_session = models.TextField(blank=True)
+    session_saved_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True)
+
+    class Meta(UUIDTimeStampedModel.Meta):
+        constraints = [models.UniqueConstraint(fields=["user", "provider"], name="unique_connected_account_per_provider")]
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.encrypted_password)
+
+    @property
+    def has_session(self) -> bool:
+        return bool(self.encrypted_session)
+
+    def set_password(self, plaintext: str) -> None:
+        self.encrypted_password = encrypt_secret(plaintext) if plaintext else ""
+
+    def get_password(self) -> str:
+        return decrypt_secret(self.encrypted_password) if self.encrypted_password else ""
+
+    def set_session(self, state: dict | None) -> None:
+        import json
+
+        from django.utils import timezone
+
+        self.encrypted_session = encrypt_secret(json.dumps(state)) if state else ""
+        self.session_saved_at = timezone.now() if state else None
+
+    def get_session(self) -> dict | None:
+        import json
+
+        if not self.encrypted_session:
+            return None
+        try:
+            return json.loads(decrypt_secret(self.encrypted_session))
+        except Exception:  # noqa: BLE001 - a corrupt/rotated-key session is just "not signed in"
+            return None
+
+    def __str__(self):
+        return f"{self.email} ({self.provider})"

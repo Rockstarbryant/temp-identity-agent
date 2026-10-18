@@ -46,7 +46,7 @@ def create_job(user, url: str, *, source: str = "web", goal: str = "", account_m
 
     kind = kind or (RegistrationJob.Kind.FORM if is_form_url(url) else RegistrationJob.Kind.REGISTRATION)
     mode = account_mode or UserPreferences.for_user(user).account_mode
-    if kind == RegistrationJob.Kind.FORM:
+    if kind in (RegistrationJob.Kind.FORM, RegistrationJob.Kind.ACCOUNT_SETUP):
         mode = RegistrationJob.AccountMode.TEMPORARY  # no account is created for a form
     if mode == RegistrationJob.AccountMode.PERMANENT and not EmailConnection.objects.filter(user=user).exists():
         raise ValidationError({

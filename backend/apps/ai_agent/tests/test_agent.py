@@ -21,7 +21,7 @@ class TestToolRegistry:
             assert definition.parameters.get("type") == "object" or "properties" in definition.parameters
 
     def test_registry_matches_spec_tool_set(self):
-        expected_prefixes = {"browser.", "identity.", "email.", "registration.", "profile.", "user.", "site.", "form.", "data."}
+        expected_prefixes = {"browser.", "identity.", "email.", "registration.", "profile.", "user.", "site.", "form.", "data.", "account."}
         for name in TOOL_REGISTRY:
             assert any(name.startswith(p) for p in expected_prefixes), f"{name} not in an expected namespace"
 
@@ -101,7 +101,7 @@ class _ScriptedProvider(AIProvider):
 
 
 class _FakeSession:
-    def __init__(self, job, headless=True):
+    def __init__(self, job, headless=True, storage_state=None):
         self.page = MagicMock()
         self.page.url = "https://example.com/register"
         self.page.title.return_value = "Register"
@@ -291,11 +291,11 @@ class TestOpenRouterProvider:
 
         provider = OpenRouterProvider()
         body = _ok_body()
-        body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = "browser__open"
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = "browser_open"
         result, calls = _complete(provider, [(200, body)])
         sent_names = [t["function"]["name"] for t in calls[0].kwargs["json"]["tools"]]
         assert sent_names and all(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", n) for n in sent_names)
-        assert "browser__open" in sent_names
+        assert "browser_open" in sent_names
         assert result.message.tool_calls[0].name == "browser.open"
 
     def test_prompt_tool_names_rewritten_to_wire_names(self):
@@ -306,7 +306,7 @@ class TestOpenRouterProvider:
             [ChatMessage(role="system", content="Use browser.open then registration.mark_complete.")],
             build_tool_definitions(),
         )
-        assert payload["messages"][0]["content"] == "Use browser__open then registration__mark_complete."
+        assert payload["messages"][0]["content"] == "Use browser_open then registration_mark_complete."
 
     def test_empty_tool_arguments_become_empty_dict(self):
         from ai.providers.openrouter import OpenRouterProvider

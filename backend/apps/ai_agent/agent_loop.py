@@ -22,10 +22,12 @@ from ai.prompts.system_prompt import build_system_prompt
 from ai.schemas import ChatMessage
 from apps.ai_agent.context import AgentContext
 from apps.ai_agent.dispatcher import dispatch_tool_call
+from apps.ai_agent.human_hold import hold_for_human
 from apps.ai_agent.tools import build_tool_definitions
 from apps.ai_agent.models import AgentSession
 from apps.ai_agent.step_detail import describe_step, index_elements, redact_for_storage
 from apps.browser import live_view
+from apps.profiles import signin
 from apps.common.db import ensure_db_connection
 from apps.browser.playwright_client import ManagedBrowserSession
 from apps.email_service.models import TemporaryEmail
@@ -99,8 +101,12 @@ class AgentRunner:
             ChatMessage(role="user", content=instruction),
         ]
 
-        with ManagedBrowserSession(self.job) as session:
-            ctx = AgentContext(job=self.job, session=session)
+        # Forms behind a Google/Microsoft sign-in reuse the user's connected account session.
+        # It is loaded only from this job owner's own account row, into this job's own browser.
+        provider = signin.provider_for_url(target_url) if self.job.kind == RegistrationJob.Kind.FORM else ""
+        account = signin.get_account(self.job.user, provider)
+        with ManagedBrowserSession(self.job, storage_state=account.get_session() if account else None) as session:
+            ctx = AgentContext(job=self.job, session=session, provider=provider)
             if self.job.identity is not None:
                 ctx.identity = self.job.identity
                 ctx.mailbox = TemporaryEmail.objects.filter(identity=self.job.identity).first()
@@ -158,6 +164,11 @@ class AgentRunner:
                         # Keep the browser open so the user can finish the step
                         # (CAPTCHA etc.) from the live view and continue right here.
                         resumed_by_human = self._hold_for_human(session, deadline)
+                        if resumed_by_human and ctx.awaiting_signin:
+                            ctx.awaiting_signin = False
+                            if account and not signin.is_login_url(provider, session.page.url):
+                                ctx.signed_in = True
+                                signin.save_session(account, session)
                         if resumed_by_human:
                             # Extend the budget by the time the human took.
                             deadline = time.monotonic() + self.job.timeout_seconds
@@ -202,55 +213,8 @@ class AgentRunner:
             pass
 
     def _hold_for_human(self, session, deadline: float) -> bool:
-        """
-        The job is paused for a CAPTCHA / manual step. Keep this browser open,
-        stream it to the live view, apply the user's input, and wait.
-
-        Returns True if the user pressed Continue (job moved back to ANALYZING),
-        False if the wait ended some other way (timeout, cancelled, disabled).
-        """
-        max_wait = getattr(settings, "HUMAN_ASSIST_TIMEOUT_SECONDS", 0)
-        if max_wait <= 0:
-            return False
-        tick = max(getattr(settings, "LIVE_VIEW_TICK_SECONDS", 0.6), 0)
-        job_id = self.job.id
-        live_view.clear_done(job_id)
-        live_view.set_holding(job_id)
-        idle_ticks = 0
-        end = time.monotonic() + max_wait
-        try:
-            while time.monotonic() < end:
-                ensure_db_connection()
-                self.job.refresh_from_db(fields=["state"])
-                if self.job.state not in RegistrationJob.RESUMABLE_STATES:
-                    return False  # cancelled (or otherwise changed) while waiting
-                if live_view.consume_done(job_id):
-                    self.job.state = RegistrationJob.State.ANALYZING
-                    self.job.error_code = ""
-                    self.job.error_message = ""
-                    self.job.save(update_fields=["state", "error_code", "error_message", "updated_at"])
-                    return True
-
-                live_view.set_holding(job_id)
-                changed = False
-                for event in live_view.pop_inputs(job_id):
-                    try:
-                        live_view.apply_event(session.page, event)
-                        changed = True
-                    except Exception:  # noqa: BLE001 - one bad tap must not end the wait
-                        continue
-                if live_view.has_viewer(job_id) or changed or idle_ticks % 8 == 0:
-                    try:
-                        self._frames.publish(session.page, interactive=True)
-                    except Exception:  # noqa: BLE001
-                        pass
-                idle_ticks += 1
-                time.sleep(tick)
-            return False
-        finally:
-            live_view.clear_holding(job_id)
-            live_view.clear_frame(job_id)
-            self._frames.reset()
+        """Pause for the user (CAPTCHA, sign-in...) with the live view; see human_hold."""
+        return hold_for_human(self.job, session, self._frames)
 
     def _persist_step(self, step_index: int, tool_call, outcome: dict, element: dict | None = None) -> None:
         safe_input, safe_outcome = redact_for_storage(

@@ -17,7 +17,8 @@ from apps.common.url_safety import validate_url
 from apps.email_service.providers.base import EmailProviderError
 from apps.email_service.providers.user_imap import open_imap, preset_host
 from apps.profiles import standard_fields as sf
-from apps.profiles.models import EmailConnection, ProfileEntry, UserPreferences
+from apps.profiles import signin
+from apps.profiles.models import ConnectedAccount, EmailConnection, ProfileEntry, UserPreferences
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -266,3 +267,99 @@ class GmailCallbackView(APIView):
         AuditLog.objects.create(user=user, action="email.connected", resource_type="EmailConnection",
                                 resource_id=str(conn.id), metadata={"kind": "gmail"})
         return _settings_redirect(gmail="connected")
+
+
+# --- Connected Google / Microsoft accounts (for forms that need a sign-in) -----------
+
+def _account_dict(a: ConnectedAccount) -> dict:
+    return {
+        "provider": a.provider,
+        "email": a.email,
+        "has_password": a.has_password,
+        "signed_in": a.has_session,
+        "session_saved_at": a.session_saved_at,
+        "last_used_at": a.last_used_at,
+        "last_error": a.last_error,
+    }
+
+
+class ConnectedAccountsView(APIView):
+    """
+    GET /api/connected-accounts/ — the user's accounts (never includes secrets)
+    PUT /api/connected-accounts/ — {provider, email, password?}; a blank password keeps the saved one
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "email_connect"
+
+    def get_throttles(self):
+        return super().get_throttles() if self.request.method == "PUT" else []
+
+    def get(self, request):
+        return Response([_account_dict(a) for a in ConnectedAccount.objects.filter(user=request.user).order_by("provider")])
+
+    def put(self, request):
+        provider = str(request.data.get("provider", ""))
+        email = str(request.data.get("email", "")).strip().lower()
+        password = str(request.data.get("password", ""))
+        if provider not in ConnectedAccount.Provider.values:
+            return Response({"detail": "Choose Google or Microsoft."}, status=status.HTTP_400_BAD_REQUEST)
+        if "@" not in email or len(email) > 254:
+            return Response({"detail": "Enter the account's email address."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(password) > 200:
+            return Response({"detail": "That password is too long."}, status=status.HTTP_400_BAD_REQUEST)
+        account = ConnectedAccount.objects.filter(user=request.user, provider=provider).first() or ConnectedAccount(
+            user=request.user, provider=provider
+        )
+        if account.pk and account.email != email:
+            account.set_session(None)  # a different account: the old session no longer applies
+            account.set_password("")
+        account.email = email
+        if password:
+            account.set_password(password)
+        account.last_error = ""
+        account.save()
+        AuditLog.objects.create(
+            user=request.user, action="connected_account.saved", resource_type="ConnectedAccount",
+            resource_id=str(account.id), metadata={"provider": provider},
+        )
+        return Response(_account_dict(account))
+
+
+class ConnectedAccountDetailView(APIView):
+    """DELETE /api/connected-accounts/{provider}/ — forget the account, its password and its session."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, provider):
+        deleted, _ = ConnectedAccount.objects.filter(user=request.user, provider=provider).delete()
+        if deleted:
+            AuditLog.objects.create(
+                user=request.user, action="connected_account.removed", resource_type="ConnectedAccount",
+                resource_id=provider, metadata={"provider": provider},
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ConnectedAccountSignInView(APIView):
+    """POST /api/connected-accounts/{provider}/signin/ — start a job that signs in and saves the session."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "email_connect"
+
+    def post(self, request, provider):
+        from apps.registration.jobs import create_job
+        from apps.registration.models import RegistrationJob
+        from apps.registration.serializers import RegistrationJobSerializer
+
+        if provider not in signin.LOGIN_URLS:
+            return Response({"detail": "Unknown provider."}, status=status.HTTP_404_NOT_FOUND)
+        if not ConnectedAccount.objects.filter(user=request.user, provider=provider).exists():
+            return Response({"detail": "Add the account first."}, status=status.HTTP_400_BAD_REQUEST)
+        job = create_job(
+            request.user, signin.LOGIN_URLS[provider], kind=RegistrationJob.Kind.ACCOUNT_SETUP,
+            goal=provider, audit_extra={"provider": provider},
+        )
+        return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)

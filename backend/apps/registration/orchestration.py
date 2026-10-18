@@ -110,7 +110,12 @@ def start_registration_job(job_id) -> RegistrationJob:
     job.save(update_fields=["state", "started_at", "updated_at"])
 
     try:
-        AgentRunner(job).run(job.target_url or job.target_website.registration_url, resume=False)
+        if job.kind == RegistrationJob.Kind.ACCOUNT_SETUP:
+            from apps.ai_agent.account_setup import run_account_setup
+
+            run_account_setup(job)
+        else:
+            AgentRunner(job).run(job.target_url or job.target_website.registration_url, resume=False)
     except TempIdentityAgentError as exc:
         ensure_db_connection()
         job.refresh_from_db()

@@ -222,6 +222,7 @@ export default function JobDetailPage() {
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AiBadge provider={job.provider} model={job.model} />
+          {job.kind === "account_setup" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Connect account</span>}
           {job.kind === "form" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Form</span>}
           {job.kind === "registration" && job.account_mode === "permanent" && (
             <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Permanent account</span>
@@ -261,10 +262,17 @@ export default function JobDetailPage() {
         </div>
       )}
 
+      {job.state === "completed" && job.kind === "account_setup" && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+          <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0" /> {job.result?.note || "Account connected."}</span>
+          <Link href="/settings" className="shrink-0 font-medium underline">Back to settings</Link>
+        </div>
+      )}
+
       {job.state === "completed" && job.account_id && (
         <CredentialsCard accountId={job.account_id} domain={job.domain} />
       )}
-      {job.state === "completed" && !job.account_id && (
+      {job.state === "completed" && !job.account_id && job.kind !== "account_setup" && job.kind !== "form" && (
         <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-700">
           <CheckCircle2 className="h-4 w-4" /> Account created —
           <Link href="/accounts" className="font-medium underline">view it in your vault</Link>

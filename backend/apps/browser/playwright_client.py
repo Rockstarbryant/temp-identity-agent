@@ -39,8 +39,10 @@ class ManagedBrowserSession:
             ...
     """
 
-    def __init__(self, job: RegistrationJob, headless: bool = True):
+    def __init__(self, job: RegistrationJob, headless: bool = True, storage_state: dict | None = None):
         self.job = job
+        # Cookies of a signed-in account (this user's own, loaded per job; never shared).
+        self.storage_state = storage_state
         self.headless = headless
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
@@ -60,7 +62,8 @@ class ManagedBrowserSession:
                 viewport={
                     "width": settings.BROWSER_VIEWPORT_WIDTH,
                     "height": settings.BROWSER_VIEWPORT_HEIGHT,
-                }
+                },
+                **({"storage_state": self.storage_state} if self.storage_state else {}),
             )
             # The user can now drive this browser from the live view, so every
             # request (not just the agent's own navigations) is SSRF-checked.
@@ -112,6 +115,13 @@ class ManagedBrowserSession:
             route.continue_()
         else:
             route.abort("blockedbyclient")
+
+    def export_storage_state(self) -> dict | None:
+        """Cookies/local storage of this browser, to be saved for the next job."""
+        try:
+            return self._context.storage_state() if self._context is not None else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def goto(self, url: str) -> None:
         validate_url(url)

@@ -77,7 +77,7 @@ class _Scripted(AIProvider):
 
 
 class _FakeSession:
-    def __init__(self, job, headless=True):
+    def __init__(self, job, headless=True, storage_state=None):
         self.page = MagicMock()
 
     def __enter__(self):

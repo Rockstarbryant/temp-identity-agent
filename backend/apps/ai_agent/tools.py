@@ -359,6 +359,45 @@ def _handle_registration_mark_human_action_required(ctx: AgentContext, args: Reg
     return {"state": ctx.job.state}
 
 
+def _pause_for_signin(ctx: AgentContext, provider: str, reason: str) -> dict:
+    """Hand the browser to the user (live view) so they can sign in themselves."""
+    ctx.awaiting_signin = True
+    ctx.job.state = RegistrationJob.State.HUMAN_ACTION_REQUIRED
+    ctx.job.error_code = "HUMAN_ACTION_REQUIRED"
+    ctx.job.error_message = reason
+    ctx.job.save(update_fields=["state", "error_code", "error_message", "updated_at"])
+    return {"success": False, "paused_for_human": True, "message": reason}
+
+
+def _handle_account_sign_in(ctx: AgentContext, args: NoArgs) -> dict:
+    from apps.profiles import signin
+
+    page = ctx.session.page
+    provider = signin.provider_for_url(page.url) or signin.provider_for_url(ctx.job.target_url)
+    if not provider:
+        return {"success": False, "error": "This is not a Google or Microsoft sign-in page; this tool does not apply."}
+    ctx.provider = provider
+    name = "Google" if provider == "google" else "Microsoft"
+    if not signin.is_login_url(provider, page.url):
+        return {"success": True, "signed_in": True, "note": "No sign-in page is showing; carry on with the form."}
+
+    account = signin.get_account(ctx.job.user, provider)
+    if account is None:
+        return _pause_for_signin(
+            ctx, provider,
+            f"This form needs a {name} sign-in. Sign in in the browser below, then press continue. "
+            f"(Connect a {name} account in Settings and the agent can do this itself next time.)",
+        )
+    result = signin.perform_login(page, account)
+    if result.ok:
+        ctx.signed_in = True
+        signin.save_session(account, ctx.session)
+        return {"success": True, "signed_in": True, "note": "Signed in. Re-inspect the page and continue."}
+    account.last_error = result.reason[:300]
+    account.save(update_fields=["last_error", "updated_at"])
+    return _pause_for_signin(ctx, provider, result.reason)
+
+
 # --- Registry ------------------------------------------------------------------
 
 @dataclass
@@ -382,6 +421,7 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         ToolSpec("browser.read_text", "Read the visible text of the current page (questions, descriptions, results).", NoArgs, _handle_browser_read_text),
         ToolSpec("profile.get", "See which details the user has saved (no keys), or fetch values for specific keys.", ProfileGetArgs, _handle_profile_get),
         ToolSpec("user.ask", "Ask the user for a detail you don't have. Waits for their answer. Never invent personal data; ask.", UserAskArgs, _handle_user_ask),
+        ToolSpec("account.sign_in", "Sign in to the Google/Microsoft account the user connected, when the form shows a Google or Microsoft sign-in page. You never see the password. If it needs the user, the job pauses for them automatically.", NoArgs, _handle_account_sign_in),
         ToolSpec("site.report_auth_methods", "Report whether the site supports sign-up/login with email and password.", AuthMethodsArgs, _handle_site_report_auth_methods),
         ToolSpec("form.complete", "After submitting a form: report every question and answer, and finish the job.", FormCompleteArgs, _handle_form_complete),
         ToolSpec("data.submit_result", "Save the information you extracted for the requester.", DataResultArgs, _handle_data_submit_result),

@@ -295,7 +295,8 @@ class _Scripted(AIProvider):
 
 
 class _Session:
-    def __init__(self, job, headless=True):
+    def __init__(self, job, headless=True, storage_state=None):
+        self.storage_state = storage_state
         self.page = MagicMock()
         self.page.url = "https://docs.google.com/forms/d/e/X/viewform"
         self.page.title.return_value = "Form"

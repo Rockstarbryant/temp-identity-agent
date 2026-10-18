@@ -89,7 +89,7 @@ class TestRegistrationJobAPI:
                 return self.script.pop(0)
 
         class FakeSession:
-            def __init__(self, job, headless=True):
+            def __init__(self, job, headless=True, storage_state=None):
                 self.page = MagicMock()
                 self.page.url = "https://example.com/register"
                 self.page.title.return_value = "Register"

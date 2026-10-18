@@ -116,7 +116,7 @@ export interface RegistrationJob {
   model: string;
   /** Vault entry created by a completed job. */
   account_id: string | null;
-  kind: "registration" | "form";
+  kind: "registration" | "form" | "account_setup";
   source: "web" | "mcp";
   account_mode: "temporary" | "permanent";
   created_at: string;
@@ -344,6 +344,18 @@ export interface EmailConnection {
   ok?: boolean;
 }
 
+export type AccountProvider = "google" | "microsoft";
+
+export interface ConnectedAccount {
+  provider: AccountProvider;
+  email: string;
+  has_password: boolean;
+  signed_in: boolean;
+  session_saved_at: string | null;
+  last_used_at: string | null;
+  last_error: string;
+}
+
 export interface ApiKeySummary {
   id: string;
   name: string;
@@ -372,6 +384,25 @@ export async function saveProfileEntry(key: string, value: string, label?: strin
 
 export async function deleteProfileEntry(key: string) {
   return request<void>(`/api/profile/entries/${encodeURIComponent(key)}/`, { method: "DELETE" });
+}
+
+export async function listConnectedAccounts() {
+  return request<ConnectedAccount[]>("/api/connected-accounts/");
+}
+
+export async function saveConnectedAccount(provider: AccountProvider, email: string, password: string) {
+  return request<ConnectedAccount>("/api/connected-accounts/", {
+    method: "PUT",
+    body: JSON.stringify({ provider, email, password }),
+  });
+}
+
+export async function removeConnectedAccount(provider: AccountProvider) {
+  return request<void>(`/api/connected-accounts/${provider}/`, { method: "DELETE" });
+}
+
+export async function startAccountSignIn(provider: AccountProvider) {
+  return request<RegistrationJob>(`/api/connected-accounts/${provider}/signin/`, { method: "POST" });
 }
 
 export async function getEmailConnection() {

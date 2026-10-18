@@ -4,14 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import {
-  getMe, logout, isAuthenticated, getProfile, getEmailConnection, listApiKeys,
-  AccountMode, ApiKeySummary, EmailConnection, ProfileData, ProfileEntry,
+  getMe, logout, isAuthenticated, getProfile, getEmailConnection, listApiKeys, listConnectedAccounts,
+  AccountMode, ApiKeySummary, ConnectedAccount, EmailConnection, ProfileData, ProfileEntry,
 } from "@/lib/api";
 import { useCachedData } from "@/lib/useCachedData";
 import { Loader2 } from "lucide-react";
 import AccountTypeCard from "@/components/settings/AccountTypeCard";
 import DetailsCard from "@/components/settings/DetailsCard";
 import EmailCard from "@/components/settings/EmailCard";
+import ConnectedAccountsCard from "@/components/settings/ConnectedAccountsCard";
 import McpCard from "@/components/settings/McpCard";
 import Section from "@/components/settings/Section";
 
@@ -32,6 +33,7 @@ function SettingsInner() {
   const { data: user } = useCachedData("me", getMe);
   const { data: profile, mutate: mutateProfile, refresh: refreshProfile } = useCachedData<ProfileData>("profile", getProfile);
   const { data: email, mutate: mutateEmail, refresh: refreshEmail } = useCachedData<EmailConnection>("email-connection", getEmailConnection);
+  const { data: accounts, mutate: mutateAccounts } = useCachedData<ConnectedAccount[]>("connected-accounts", listConnectedAccounts);
   const { data: keys, mutate: mutateKeys } = useCachedData<ApiKeySummary[]>("api-keys", listApiKeys);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -69,6 +71,8 @@ function SettingsInner() {
         profile={profile}
         onChange={(entries: ProfileEntry[]) => mutateProfile((p) => (p ? { ...p, entries } : p))}
       />
+
+      <ConnectedAccountsCard accounts={accounts ?? []} onChange={(a) => mutateAccounts(() => a)} />
 
       <McpCard keys={keys ?? []} onChange={(k) => mutateKeys(() => k)} />
 

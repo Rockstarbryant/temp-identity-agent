@@ -13,3 +13,7 @@ class AgentContext:
     session: ManagedBrowserSession | None = None
     identity: TemporaryIdentity | None = None
     mailbox: TemporaryEmail | None = None
+    # Connected Google/Microsoft account support (see apps.profiles.signin).
+    provider: str = ""            # "google" | "microsoft" | "" for the page being worked on
+    signed_in: bool = False       # a verified sign-in happened in this browser -> session can be saved
+    awaiting_signin: bool = False # paused so the user can sign in through the live view
