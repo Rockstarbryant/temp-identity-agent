@@ -83,6 +83,16 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": env.db("DATABASE_URL", default="postgres://postgres:postgres@localhost:5432/temp_identity_agent")
 }
+if DATABASES["default"]["ENGINE"].endswith("postgresql"):
+    # Managed Postgres / poolers silently drop idle SSL connections. TCP keepalives keep the
+    # socket alive, and health checks reopen a dead persistent connection before it is used.
+    DATABASES["default"].setdefault("OPTIONS", {}).update({
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    })
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 # --- Auth --------------------------------------------------------------------
 AUTH_USER_MODEL = "users.User"

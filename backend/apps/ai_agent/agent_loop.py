@@ -74,6 +74,7 @@ class AgentRunner:
         self.provider = get_ai_provider()
         self.tools = build_tool_definitions()
         self._frames = live_view.FramePublisher(job.id)
+        ensure_db_connection()
         self.agent_session, _ = AgentSession.objects.get_or_create(
             job=job, defaults={"provider": self.provider.name, "model": (self.provider.model or "")[:100]}
         )

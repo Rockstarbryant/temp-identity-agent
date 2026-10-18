@@ -87,6 +87,7 @@ def check_rate_limits(job: RegistrationJob) -> None:
 
 def start_registration_job(job_id) -> RegistrationJob:
     """Entry point called by the Celery task for a freshly-QUEUED job."""
+    ensure_db_connection()
     job = RegistrationJob.objects.select_related("user", "target_website").get(id=job_id)
 
     if job.state != RegistrationJob.State.QUEUED:
@@ -139,6 +140,7 @@ def start_registration_job(job_id) -> RegistrationJob:
 
 def resume_registration_job(job_id) -> RegistrationJob:
     """Entry point called after a user confirms they've cleared a CAPTCHA/human-action step."""
+    ensure_db_connection()
     job = RegistrationJob.objects.select_related("user", "target_website").get(id=job_id)
 
     if job.state not in RegistrationJob.RESUMABLE_STATES:
