@@ -24,6 +24,11 @@ class TestFormDetection:
     @pytest.mark.parametrize("url,expected", [
         ("https://docs.google.com/forms/d/e/abc/viewform", True),
         ("https://forms.gle/abc123", True),
+        ("https://forms.cloud.microsoft/pages/responsepage.aspx?id=abc", True),
+        ("https://forms.office.com/r/abc", True),
+        ("https://acme.typeform.com/to/abc", True),
+        ("https://tally.so/r/abc", True),
+        ("https://airtable.com/shrXYZ", True),
         ("https://docs.google.com/document/d/abc", False),
         ("https://example.com/forms/x", False),
     ])
@@ -134,3 +139,14 @@ class TestRetryKeepsJobShape:
         assert r.status_code == 201
         new = RegistrationJob.objects.get(id=r.json()["id"])
         assert new.kind == "form" and new.target_url.endswith("SECOND/viewform") and new.goal == "g"
+
+
+class TestJobBudgets:
+    def test_new_jobs_use_env_budgets(self, auth_client, settings):
+        settings.MAX_AGENT_STEPS = 75
+        settings.MAX_JOB_DURATION_SECONDS = 900
+        r = create(auth_client, "https://example.com/register")
+        from apps.registration.models import RegistrationJob
+
+        job = RegistrationJob.objects.get(id=r.json()["id"])
+        assert job.max_steps == 75 and job.timeout_seconds == 900

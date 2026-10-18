@@ -1,6 +1,7 @@
 """Creating jobs: shared by the web API and the MCP endpoint."""
 from urllib.parse import urlparse
 
+from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.models import AuditLog
@@ -58,6 +59,9 @@ def create_job(user, url: str, *, source: str = "web", goal: str = "", account_m
     job = RegistrationJob.objects.create(
         user=user, target_website=target_website, target_url=url, kind=kind, source=source,
         account_mode=mode, goal=goal[:1000],
+        # The budgets come from the environment (MAX_AGENT_STEPS / MAX_JOB_DURATION_SECONDS),
+        # not from the model-field defaults.
+        max_steps=settings.MAX_AGENT_STEPS, timeout_seconds=settings.MAX_JOB_DURATION_SECONDS,
     )
     AuditLog.objects.create(
         user=user, action="job.created", resource_type="RegistrationJob", resource_id=str(job.id),
