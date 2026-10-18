@@ -26,8 +26,14 @@ class RegistrationJobListCreateView(generics.ListCreateAPIView):
     """
 
     permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [ScopedRateThrottle]
     throttle_scope = "registration_jobs"
+
+    def get_throttles(self):
+        # Only *creating* a job is expensive. Listing jobs is polled by the dashboard every few
+        # seconds, so it uses the normal per-user limit instead of the 10/hour creation cap.
+        if self.request.method == "POST":
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         return (
