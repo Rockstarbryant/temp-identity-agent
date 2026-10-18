@@ -10,6 +10,7 @@ import logging
 
 from django.http import HttpResponse
 from rest_framework import permissions, status
+from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -78,7 +79,20 @@ def _handle(user, msg: dict):
     return _error(rpc_id, -32601, f"Method not found: {method}")
 
 
+class AnyAcceptNegotiation(DefaultContentNegotiation):
+    """
+    Always answer in JSON, whatever `Accept` says. MCP clients open the optional server-to-client
+    stream with `GET` + `Accept: text/event-stream` (and some `POST`s only list event-stream).
+    Normal negotiation would answer those with 406, but the spec wants 405 for a GET stream we
+    don't offer, and a client that sees 406 gives up on the whole connection.
+    """
+
+    def select_renderer(self, request, renderers, format_suffix=None):
+        return renderers[0], renderers[0].media_type
+
+
 class McpView(APIView):
+    content_negotiation_class = AnyAcceptNegotiation
     authentication_classes = [ApiKeyAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
@@ -89,6 +103,7 @@ class McpView(APIView):
         return HttpResponse(status=405, headers={"Allow": "POST"})
 
     def delete(self, request):
+        # Stateless server: there is no session to terminate.
         return HttpResponse(status=405, headers={"Allow": "POST"})
 
     def post(self, request):
