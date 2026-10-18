@@ -133,6 +133,8 @@ REST_FRAMEWORK = {
         "mcp": "120/min",
         # Connecting a mailbox makes an outbound login attempt.
         "email_connect": "10/hour",
+        # OAuth endpoints for MCP clients (registration, token, approval).
+        "oauth": "60/min",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -292,4 +294,6 @@ GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID", default="")
 GOOGLE_OAUTH_CLIENT_SECRET = env("GOOGLE_OAUTH_CLIENT_SECRET", default="")
 GOOGLE_OAUTH_REDIRECT_URI = env("GOOGLE_OAUTH_REDIRECT_URI", default="")
 # Where the browser is sent after the Google consent screen, and the base for job links in MCP replies.
-FRONTEND_URL = env("FRONTEND_URL", default="http://logindirect.vercel.app").rstrip("/")
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000").rstrip("/")
+# Public https address of this API (used in OAuth metadata). Leave empty to derive it from the request.
+BACKEND_PUBLIC_URL = env("BACKEND_PUBLIC_URL", default="").rstrip("/")

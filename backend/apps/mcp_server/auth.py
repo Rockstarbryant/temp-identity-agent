@@ -17,10 +17,14 @@ class ApiKeyAuthentication(authentication.BaseAuthentication):
         key = ApiKey.objects.select_related("user").filter(
             key_hash=ApiKey.hash_key(raw), revoked_at__isnull=True
         ).first()
-        if key is None or not key.user.is_active:
-            raise exceptions.AuthenticationFailed("Invalid or revoked API key.")
+        if key is None or not key.user.is_active or (key.expires_at and key.expires_at <= timezone.now()):
+            raise exceptions.AuthenticationFailed("Invalid, expired or revoked API key.")
         ApiKey.objects.filter(pk=key.pk).update(last_used_at=timezone.now())
         return key.user, key
 
     def authenticate_header(self, request):
-        return "Bearer"
+        # Tells OAuth-capable clients (claude.ai) where to start the sign-in (RFC 9728).
+        from apps.mcp_server.oauth import base_url
+
+        return f'Bearer resource_metadata="{base_url(request)}/.well-known/oauth-protected-resource"'
+

@@ -112,19 +112,23 @@ class ApiKeyListCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        keys = ApiKey.objects.filter(user=request.user, revoked_at__isnull=True)
-        return Response([{"id": str(k.id), "name": k.name, "prefix": k.prefix,
+        from django.db.models import Q
+        from django.utils import timezone
+
+        keys = ApiKey.objects.filter(user=request.user, revoked_at__isnull=True).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        return Response([{"id": str(k.id), "name": k.name, "prefix": k.prefix, "kind": k.kind,
                           "created_at": k.created_at, "last_used_at": k.last_used_at} for k in keys])
 
     def post(self, request):
         name = str(request.data.get("name", "")).strip() or "MCP client"
-        if ApiKey.objects.filter(user=request.user, revoked_at__isnull=True).count() >= 10:
+        if ApiKey.objects.filter(user=request.user, revoked_at__isnull=True, kind="manual").count() >= 10:
             return Response({"detail": "You can have at most 10 active keys. Revoke one first."},
                             status=status.HTTP_400_BAD_REQUEST)
         key, raw = ApiKey.create_for(request.user, name)
         AuditLog.objects.create(user=request.user, action="apikey.created", resource_type="ApiKey", resource_id=str(key.id))
         return Response({"id": str(key.id), "name": key.name, "prefix": key.prefix, "key": raw,
-                         "created_at": key.created_at, "last_used_at": None}, status=status.HTTP_201_CREATED)
+                         "kind": key.kind, "created_at": key.created_at, "last_used_at": None}, status=status.HTTP_201_CREATED)
 
 
 class ApiKeyDetailView(APIView):

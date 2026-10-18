@@ -88,6 +88,11 @@ export default function McpCard({ keys, onChange }: Props) {
         <div>
           <p className="mb-1 text-xs text-black/60">Server URL</p>
           <CopyBox text={endpoint} label="server URL" />
+          <p className="mt-2 text-xs text-black/50">
+            <span className="font-medium text-black/70">claude.ai:</span> Settings → Connectors → Add custom connector, paste
+            this URL and sign in when asked. No key needed. <span className="font-medium text-black/70">Claude Code, Cursor and
+            others:</span> create a key below.
+          </p>
         </div>
 
         {fresh && (
@@ -124,7 +129,7 @@ export default function McpCard({ keys, onChange }: Props) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{k.name}</p>
                   <p className="text-xs text-black/50">
-                    {k.prefix}… · {k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleString()}` : "never used"}
+                    {k.kind === "oauth" ? "Signed-in connection (renews itself)" : `${k.prefix}…`} · {k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleString()}` : "never used"}
                   </p>
                 </div>
                 <button

@@ -360,6 +360,8 @@ export interface ApiKeySummary {
   id: string;
   name: string;
   prefix: string;
+  /** "oauth" keys come from connecting a client (e.g. claude.ai) through the sign-in flow. */
+  kind?: "manual" | "oauth";
   created_at: string;
   last_used_at: string | null;
 }
@@ -441,3 +443,20 @@ export async function revokeApiKey(id: string) {
 }
 
 export { API_URL };
+
+// --- OAuth approval (MCP clients such as claude.ai) ---------------------------------
+
+export type OAuthParams = Record<string, string>;
+
+export async function getOAuthInfo(params: OAuthParams) {
+  return request<{ client_name: string; redirect_host: string | null }>(
+    `/api/oauth/authorize-info/?${new URLSearchParams(params).toString()}`,
+  );
+}
+
+export async function approveOAuth(params: OAuthParams, approve: boolean) {
+  return request<{ redirect_url: string }>("/api/oauth/approve/", {
+    method: "POST",
+    body: JSON.stringify({ ...params, approve }),
+  });
+}

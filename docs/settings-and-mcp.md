@@ -32,3 +32,18 @@ Some Google and Microsoft forms only accept signed-in people. Under Settings, "A
 - Sessions are per user and per provider and are loaded only into that user's own job browser; every job starts a fresh browser context.
 
 API: `GET/PUT /api/connected-accounts/`, `DELETE /api/connected-accounts/{provider}/`, `POST /api/connected-accounts/{provider}/signin/`.
+
+## Connecting claude.ai (OAuth)
+
+claude.ai's "Add custom connector" signs in with OAuth instead of an API key, so the API implements the MCP authorization flow (OAuth 2.1 with PKCE, dynamic client registration):
+
+1. `POST /mcp/` without a token returns 401 with `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource"`.
+2. The client reads `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, registers itself at `/oauth/register`, and sends the user to `/oauth/authorize`.
+3. That redirects to the web app's `/oauth/authorize` page, where the (logged-in) user clicks Allow. A one-time code goes back to the client's redirect URI.
+4. The client swaps the code at `/oauth/token` (PKCE S256 required) for a 1-hour access token and a 30-day refresh token (rotated on every use).
+
+Access tokens are ordinary MCP API keys with `kind="oauth"`. Revoking one in Settings disconnects the client (its refresh token stops working). Only https and `http://localhost` redirect URIs can be registered.
+
+Settings: `FRONTEND_URL` must be the web app's public URL (the approval page lives there). `BACKEND_PUBLIC_URL` is optional; set it if the API sits behind a proxy and the metadata shows the wrong host.
+
+In claude.ai: Settings, Connectors, Add custom connector, paste `https://<your-api>/mcp/`, then sign in and Allow.
