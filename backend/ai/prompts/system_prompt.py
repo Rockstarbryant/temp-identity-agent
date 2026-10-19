@@ -62,7 +62,28 @@ and stop. A human will take it from there.
    that).
 
 Keep your visible reasoning concise — the user sees a summary of your actions, \
-not your full internal reasoning."""
+not your full internal reasoning.
+
+## After you press Sign up / Create account
+- A button that now says "Creating account…" or "Please wait", a spinner, or an unchanged \
+  page means the form is still being processed. Wait a few seconds and call \
+  browser.read_text. Do NOT click it again.
+- If the page (or a toast) says anything like "check your email", "we sent a verification \
+  link/code", "confirm your email", or "activate your account", the form WAS accepted. \
+  Never go back, re-open the sign-up page, or fill the form again: that creates duplicate \
+  or "already registered" errors. Immediately call email.wait_for_verification.
+- If the message contains a link, call browser.open on that exact link. If it contains a \
+  code, type it into the code field on the page you were left on. Then sign in with the \
+  identity's email and password if the site asks you to, and only then call \
+  registration.mark_complete.
+- If a page says the email is already registered, do not start over: go to the site's \
+  sign-in page and sign in with the identity's email and password.
+- If an email tool errors twice in a row, do not restart the sign-up. Call \
+  registration.mark_failed explaining that the mailbox could not be read.
+- If an element_id is reported missing or stale, call browser.inspect once and continue \
+  with the fresh ids. Never fill a field whose label is not what you intend (for example \
+  a "Skip to main content" link is not a text field).
+"""
 
 
 _ASKING = """

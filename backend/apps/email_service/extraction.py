@@ -7,6 +7,7 @@ scored by how strongly their URL or surrounding anchor text signals
 OTP codes are found by proximity to code-related keywords first, falling
 back to the first standalone 4-8 digit run if no keyword match exists.
 """
+import html
 import re
 
 _LINK_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
@@ -16,6 +17,9 @@ _VERIFY_KEYWORDS = (
     "verify", "confirm", "activate", "activation", "validate",
     "verification", "confirmation", "authenticate",
 )
+
+_NOT_A_LINK_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".ico", ".webp")
+_NEVER_VERIFY = ("unsubscribe", "optout", "opt-out", "preferences", "privacy", "terms")
 
 _OTP_KEYWORD_RE = re.compile(
     r"(?:code|otp|pin|passcode)\D{0,20}(\d{4,8})", re.IGNORECASE
@@ -40,14 +44,20 @@ def find_verification_link(html_or_text: str) -> str | None:
     hrefs = _LINK_RE.findall(html_or_text)
     urls = hrefs if hrefs else _BARE_URL_RE.findall(html_or_text)
 
-    for url in urls:
-        score = sum(1 for kw in _VERIFY_KEYWORDS if kw in url.lower())
+    for raw in urls:
+        url = html.unescape(raw).strip()  # href="...?a=1&amp;b=2" must become ...?a=1&b=2
+        lowered = url.lower()
+        if not lowered.startswith(("http://", "https://")) or lowered.endswith(_NOT_A_LINK_SUFFIXES):
+            continue  # mailto:, tel:, images, stylesheets
+        score = sum(1 for kw in _VERIFY_KEYWORDS if kw in lowered)
+        if any(word in lowered for word in _NEVER_VERIFY):
+            score -= 5  # unsubscribe / preference links are never the one we want
         candidates.append((url, score))
 
     if not candidates:
         return None
 
-    candidates.sort(key=lambda pair: pair[1], reverse=True)
+    candidates.sort(key=lambda pair: pair[1], reverse=True)  # stable: ties keep email order
     return candidates[0][0]
 
 

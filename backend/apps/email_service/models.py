@@ -50,7 +50,8 @@ class EmailMessage(UUIDTimeStampedModel):
     text_body = models.TextField(blank=True)
     html_body = models.TextField(blank=True)
     received_at = models.DateTimeField(null=True, blank=True)
-    extracted_link = models.URLField(blank=True)
+    # Verification links carry long signed tokens; URLField's default 200 chars is far too short.
+    extracted_link = models.URLField(max_length=2000, blank=True)
     extracted_otp = models.CharField(max_length=20, blank=True)
 
     class Meta(UUIDTimeStampedModel.Meta):

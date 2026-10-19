@@ -96,6 +96,20 @@ def attach_user_mailbox(identity: TemporaryIdentity, connection) -> TemporaryEma
     return mailbox
 
 
+def _message_fields(detail, link, otp) -> dict:
+    """Column values for an EmailMessage, clipped to the column sizes so one odd message can
+    never make the whole mailbox sync fail with "value too long for type character varying"."""
+    return {
+        "sender": (detail.sender or "")[:255],
+        "subject": (detail.subject or "")[:500],
+        "text_body": detail.text_body or "",
+        "html_body": detail.html_body or "",
+        "received_at": detail.received_at or timezone.now(),
+        "extracted_link": (link or "")[:2000],
+        "extracted_otp": (otp or "")[:20],
+    }
+
+
 def sync_messages(mailbox: TemporaryEmail) -> list[EmailMessage]:
     """Fetch the mailbox's current message list and upsert them locally."""
     provider = get_provider(mailbox.provider)
@@ -110,16 +124,8 @@ def sync_messages(mailbox: TemporaryEmail) -> list[EmailMessage]:
 
         message, _created = EmailMessage.objects.update_or_create(
             mailbox=mailbox,
-            external_id=detail.external_id,
-            defaults={
-                "sender": detail.sender,
-                "subject": detail.subject,
-                "text_body": detail.text_body,
-                "html_body": detail.html_body,
-                "received_at": detail.received_at or timezone.now(),
-                "extracted_link": link or "",
-                "extracted_otp": otp or "",
-            },
+            external_id=(detail.external_id or "")[:255],
+            defaults=_message_fields(detail, link, otp),
         )
         saved.append(message)
     return saved
@@ -143,15 +149,7 @@ def wait_for_verification_email(
 
     message, _created = EmailMessage.objects.update_or_create(
         mailbox=mailbox,
-        external_id=detail.external_id,
-        defaults={
-            "sender": detail.sender,
-            "subject": detail.subject,
-            "text_body": detail.text_body,
-            "html_body": detail.html_body,
-            "received_at": detail.received_at or timezone.now(),
-            "extracted_link": link or "",
-            "extracted_otp": otp or "",
-        },
+        external_id=(detail.external_id or "")[:255],
+        defaults=_message_fields(detail, link, otp),
     )
     return message

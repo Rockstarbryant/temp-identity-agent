@@ -121,3 +121,59 @@ class TestMailboxLocalPart:
                 ]
                 mailbox = provider.create_mailbox()
             assert re.fullmatch(r"[a-z0-9]{12}@test\.example", mailbox.address), mailbox.address
+
+
+class TestLongVerificationLinks:
+    """Regression: a >200 char verification link made email.* tools fail with
+    'value too long for type character varying(200)', so the agent never saw the email."""
+
+    def test_html_entities_in_href_are_decoded(self):
+        html = '<a href="https://x.io/verify?a=1&amp;b=2">Verify</a>'
+        assert find_verification_link(html) == "https://x.io/verify?a=1&b=2"
+
+    def test_unsubscribe_and_mailto_never_win(self):
+        html = (
+            '<a href="mailto:help@x.io">Help</a>'
+            '<a href="https://x.io/unsubscribe?u=1">Unsubscribe</a>'
+            '<a href="https://x.io/logo.png">logo</a>'
+            '<a href="https://x.io/welcome">Welcome</a>'
+        )
+        assert find_verification_link(html) == "https://x.io/welcome"
+
+    def test_long_link_is_saved_and_returned(self):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock, patch
+
+        from apps.email_service import service
+        from apps.email_service.models import TemporaryEmail
+        from apps.email_service.schemas import MessageDetail
+        from apps.identities.models import TemporaryIdentity
+        from apps.users.models import User
+
+        user = User.objects.create_user("longlink", password="pw-Strong-123")
+        identity = TemporaryIdentity.objects.create(
+            user=user, name="N", email="a@b.co", expires_at=datetime(2030, 1, 1, tzinfo=timezone.utc))
+        identity.set_password("x") if hasattr(identity, "set_password") else None
+        mailbox = TemporaryEmail(identity=identity, provider="mailtm", address="a@b.co",
+                                 expires_at=identity.expires_at)
+        mailbox.set_credential("{}")
+        mailbox.save()
+
+        long_link = "https://app.example.com/auth/verify?token=" + "a" * 600 + "&email=a%40b.co"
+        detail = MessageDetail(external_id="m1", sender="s" * 400, subject="Verify " + "y" * 700,
+                               text_body="hi", html_body=f'<a href="{long_link}">Verify</a>')
+        provider = MagicMock()
+        provider.wait_for_message.return_value = detail
+        provider.extract_verification_link.return_value = long_link
+        provider.extract_otp.return_value = None
+        with patch.object(service, "get_provider", return_value=provider):
+            message = service.wait_for_verification_email(mailbox, timeout_seconds=1)
+        message.refresh_from_db()
+        assert message.extracted_link == long_link
+        assert len(message.sender) == 255 and len(message.subject) == 500
+
+
+def test_prompt_tells_agent_not_to_restart_after_verification_notice():
+    from ai.prompts.system_prompt import SYSTEM_PROMPT
+
+    assert "Never go back" in SYSTEM_PROMPT and "email.wait_for_verification" in SYSTEM_PROMPT
