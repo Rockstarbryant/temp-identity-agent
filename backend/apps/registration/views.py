@@ -275,3 +275,103 @@ def _get_owned_job_or_404(user, pk):
     from django.shortcuts import get_object_or_404
 
     return get_object_or_404(RegistrationJob, id=pk, user=user)
+
+
+MANUAL_STATES = {
+    RegistrationJob.State.CAPTCHA_REQUIRED, RegistrationJob.State.HUMAN_ACTION_REQUIRED,
+    RegistrationJob.State.FAILED, RegistrationJob.State.EXPIRED,
+}
+
+
+def _ensure_identity(job):
+    """A manual sign-up needs an identity and mailbox even if the agent never got that far."""
+    from apps.email_service import service as email_service
+    from apps.email_service.models import TemporaryEmail
+    from apps.identities import service as identity_service
+
+    if job.identity is None:
+        job.identity = identity_service.create_temporary_identity(job.user)
+        job.save(update_fields=["identity", "updated_at"])
+    if not TemporaryEmail.objects.filter(identity=job.identity).exists():
+        email_service.create_mailbox_for_identity(job.identity)
+    return job.identity
+
+
+class RegistrationJobManualKitView(APIView):
+    """
+    POST /api/registration-jobs/{id}/manual-kit/
+
+    The registration form's fields with the values to paste in, including the
+    password. POST (not GET) and audit-logged because it returns a secret.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.ai_agent.tools import _profile_values
+        from apps.registration.manual import resolve_kit
+
+        job = _get_owned_job_or_404(request.user, pk)
+        if job.kind != RegistrationJob.Kind.REGISTRATION or job.state not in MANUAL_STATES:
+            return Response({"detail": "A manual sign-up kit is only available for a registration that needs you."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        _ensure_identity(job)
+        AuditLog.objects.create(
+            user=request.user, action="job.manual_kit_revealed", resource_type="RegistrationJob",
+            resource_id=str(job.id), ip_address=request.META.get("REMOTE_ADDR"),
+        )
+        return Response(resolve_kit(job, _profile_values(request.user)))
+
+
+class RegistrationJobManualCompleteView(APIView):
+    """
+    POST /api/registration-jobs/{id}/manual-complete/  {username?, password?, note?}
+
+    The user finished signing up by hand. Save it to the vault; the mailbox
+    keeps being watched so the verification email still reaches them.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.accounts.models import TemporaryAccount
+        from apps.notifications.service import notify
+
+        job = _get_owned_job_or_404(request.user, pk)
+        if job.kind != RegistrationJob.Kind.REGISTRATION or job.state not in MANUAL_STATES:
+            return Response({"detail": "This job can't be saved as a manual sign-up."}, status=status.HTTP_400_BAD_REQUEST)
+        identity = _ensure_identity(job)
+
+        username = str(request.data.get("username") or "").strip()[:150]
+        password = str(request.data.get("password") or "")[:200]
+        note = str(request.data.get("note") or "").strip()[:500]
+        changed = []
+        if username and username != identity.username:
+            identity.username = username
+            changed.append("username")
+        if password:
+            identity.set_password(password)
+            changed.append("encrypted_password")
+        if changed:
+            identity.save(update_fields=changed + ["updated_at"])
+
+        result = dict(job.result or {})
+        result.pop("manual_kit", None)
+        result["manual"] = True
+        if note:
+            result["note"] = note
+        job.result = result
+        job.state = RegistrationJob.State.COMPLETED
+        job.error_code, job.error_message = "", ""
+        job.completed_at = timezone.now()
+        job.save(update_fields=["result", "state", "error_code", "error_message", "completed_at", "updated_at"])
+        account, _ = TemporaryAccount.objects.get_or_create(
+            job=job, defaults={"identity": identity, "website": job.target_website})
+        AuditLog.objects.create(
+            user=request.user, action="job.manual_saved", resource_type="RegistrationJob",
+            resource_id=str(job.id), ip_address=request.META.get("REMOTE_ADDR"),
+        )
+        notify(request.user, "manual_saved", f"Saved your {job.target_website.domain} sign-up",
+               "Credentials are in your vault. Verification emails will show up in its mailbox.",
+               link=f"/accounts/{account.id}", dedupe_key=f"manual:{job.id}")
+        return Response({"account_id": str(account.id), "state": job.state}, status=status.HTTP_200_OK)

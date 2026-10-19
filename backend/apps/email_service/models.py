@@ -26,6 +26,8 @@ class TemporaryEmail(UUIDTimeStampedModel):
     encrypted_credential = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     expires_at = models.DateTimeField()
+    # When the provider was last asked for new mail (the background poller and the live stream use it).
+    last_polled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(UUIDTimeStampedModel.Meta):
         indexes = [models.Index(fields=["address"])]
@@ -53,6 +55,8 @@ class EmailMessage(UUIDTimeStampedModel):
     # Verification links carry long signed tokens; URLField's default 200 chars is far too short.
     extracted_link = models.URLField(max_length=2000, blank=True)
     extracted_otp = models.CharField(max_length=20, blank=True)
+    # Set when the user opens the message in the vault.
+    read_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(UUIDTimeStampedModel.Meta):
         indexes = [models.Index(fields=["mailbox", "received_at"])]

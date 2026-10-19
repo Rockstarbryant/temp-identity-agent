@@ -54,6 +54,9 @@ class TemporaryAccountDetailView(generics.RetrieveDestroyAPIView):
         from apps.email_service.models import TemporaryEmail
 
         TemporaryEmail.objects.filter(identity=identity).update(encrypted_credential="")
+        from apps.email_service.models import EmailMessage
+
+        EmailMessage.objects.filter(mailbox__identity=identity).delete()  # the inbox is erased too
 
         AuditLog.objects.create(
             user=self.request.user, action="account.deleted", resource_type="TemporaryAccount",

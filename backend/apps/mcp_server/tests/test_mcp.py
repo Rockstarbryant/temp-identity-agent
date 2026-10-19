@@ -81,7 +81,7 @@ class TestProtocol:
     def test_tools_list_has_schemas(self, mcp):
         tools = mcp("tools/list").json()["result"]["tools"]
         names = {t["name"] for t in tools}
-        assert {"register_on_site", "get_job", "answer_question", "cancel_job", "list_jobs"} <= names
+        assert {"register_on_site", "get_job", "answer_question", "cancel_job", "list_jobs", "list_accounts", "check_mailbox"} <= names
         assert all(t["inputSchema"]["type"] == "object" and t["description"] for t in tools)
         assert "get_credentials" not in names  # credentials are never exposed to remote clients
 
@@ -193,3 +193,22 @@ class TestKeyManagement:
     def test_cannot_revoke_someone_elses_key(self, auth_client, other_user):
         k, _ = ApiKey.create_for(other_user, "theirs")
         assert auth_client.delete(f"/api/api-keys/{k.id}/").status_code == 404
+
+
+class TestAcceptHeaders:
+    """MCP clients send Accept: text/event-stream; that must never produce a 406."""
+
+    BODY = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+
+    @pytest.mark.parametrize("accept", ["application/json, text/event-stream", "text/event-stream", "*/*", "application/json"])
+    def test_post_works_for_any_accept(self, mcp, api_client, accept):
+        r = api_client.post("/mcp/", self.BODY, format="json", HTTP_ACCEPT=accept)
+        assert r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "temp-identity-agent"
+
+    @pytest.mark.parametrize("accept", ["text/event-stream", "application/json", "*/*"])
+    def test_get_stream_is_405_not_406(self, mcp, api_client, accept):
+        r = api_client.get("/mcp/", HTTP_ACCEPT=accept)
+        assert r.status_code == 405
+
+    def test_delete_is_405(self, mcp, api_client):
+        assert api_client.delete("/mcp/", HTTP_ACCEPT="text/event-stream").status_code == 405

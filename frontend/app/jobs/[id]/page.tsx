@@ -14,6 +14,7 @@ import StateBadge from "@/components/StateBadge";
 import AiBadge from "@/components/AiBadge";
 import LiveBrowser from "@/components/LiveBrowser";
 import QuestionCard from "@/components/QuestionCard";
+import ManualKit from "@/components/ManualKit";
 import {
   CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight, RotateCcw, Trash2,
   Copy, Check, Eye, KeyRound,
@@ -25,6 +26,7 @@ const RETRYABLE = new Set(["failed", "cancelled", "expired"]);
 
 // Fallback wording when a step has no detail (steps recorded before details existed).
 const FALLBACK_LABELS: Record<string, string> = {
+  "playbook.replay": "Used the steps saved from an earlier sign-up",
   "browser.open": "Opened the registration page",
   "browser.inspect": "Looked at the page",
   "browser.click": "Clicked a button",
@@ -299,6 +301,10 @@ export default function JobDetailPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {job.manual_available && job.kind === "registration" && (
+        <ManualKit jobId={id} onSaved={() => refresh()} />
       )}
 
       {!TERMINAL.has(job.state) && (

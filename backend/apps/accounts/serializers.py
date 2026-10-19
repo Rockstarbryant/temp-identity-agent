@@ -9,12 +9,16 @@ class TemporaryAccountSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="identity.username", read_only=True)
     expires_at = serializers.DateTimeField(source="identity.expires_at", read_only=True)
     permanent = serializers.SerializerMethodField()
+    manual = serializers.SerializerMethodField()
 
     class Meta:
         model = TemporaryAccount
-        fields = ["id", "domain", "email", "username", "status", "revealed_at", "expires_at", "created_at", "permanent"]
+        fields = ["id", "domain", "email", "username", "status", "revealed_at", "expires_at", "created_at", "permanent", "manual"]
         read_only_fields = fields
 
+
+    def get_manual(self, obj) -> bool:
+        return bool((obj.job.result or {}).get("manual"))
 
     def get_permanent(self, obj) -> bool:
         return obj.job.account_mode == "permanent"

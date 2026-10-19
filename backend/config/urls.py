@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.profiles.urls")),
     path("api/", include("apps.mcp_server.urls")),
+    path("api/", include("apps.notifications.urls")),
     path("mcp/", McpView.as_view(), name="mcp"),
     # OAuth for MCP clients such as claude.ai (discovery, registration, authorize, token)
     re_path(r"^\.well-known/oauth-protected-resource(?:/.*)?$", oauth.protected_resource_metadata),

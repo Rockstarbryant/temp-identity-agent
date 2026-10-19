@@ -39,13 +39,33 @@ def expire_temporary_identities():
         TemporaryEmail.objects.filter(identity=identity, status=TemporaryEmail.Status.ACTIVE).update(
             status=TemporaryEmail.Status.EXPIRED, encrypted_credential=""
         )
-        TemporaryAccount.objects.filter(identity=identity).exclude(
-            status=TemporaryAccount.Status.DELETED
-        ).update(status=TemporaryAccount.Status.EXPIRED)
+        from apps.email_service.models import EmailMessage
+
+        EmailMessage.objects.filter(mailbox__identity=identity).delete()  # erase the inbox with the account
+        affected = list(
+            TemporaryAccount.objects.filter(identity=identity)
+            .exclude(status=TemporaryAccount.Status.DELETED).select_related("website", "job__user")
+        )
+        TemporaryAccount.objects.filter(pk__in=[a.pk for a in affected]).update(
+            status=TemporaryAccount.Status.EXPIRED
+        )
+        _announce_expired(affected)
         count += 1
 
     logger.info("expire_temporary_identities: expired %d identities", count)
     return count
+
+
+def _announce_expired(accounts) -> None:
+    from apps.notifications.models import Notification
+    from apps.notifications.service import notify
+
+    for account in accounts:
+        notify(
+            account.job.user, Notification.Kind.ACCOUNT_EXPIRED, f"Your {account.website.domain} account expired",
+            "The account and its mailbox were erased.", "/accounts",
+            {"account_id": str(account.id), "domain": account.website.domain}, f"expired:{account.id}",
+        )
 
 
 @shared_task

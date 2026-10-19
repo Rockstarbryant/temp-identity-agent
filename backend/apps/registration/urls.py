@@ -6,6 +6,8 @@ from apps.registration.views import (
     RegistrationJobClearFinishedView,
     RegistrationJobDetailView,
     RegistrationJobListCreateView,
+    RegistrationJobManualCompleteView,
+    RegistrationJobManualKitView,
     RegistrationJobLiveInputView,
     RegistrationJobLiveView,
     RegistrationJobResumeView,
@@ -21,5 +23,7 @@ urlpatterns = [
     path("registration-jobs/<uuid:pk>/live/input/", RegistrationJobLiveInputView.as_view(), name="job-live-input"),
     path("registration-jobs/<uuid:pk>/questions/<uuid:qid>/answer/", RegistrationJobAnswerView.as_view(), name="job-answer"),
     path("registration-jobs/<uuid:pk>/cancel/", RegistrationJobCancelView.as_view(), name="job-cancel"),
+    path("registration-jobs/<uuid:pk>/manual-kit/", RegistrationJobManualKitView.as_view(), name="job-manual-kit"),
+    path("registration-jobs/<uuid:pk>/manual-complete/", RegistrationJobManualCompleteView.as_view(), name="job-manual-complete"),
     path("registration-jobs/<uuid:pk>/retry/", RegistrationJobRetryView.as_view(), name="job-retry"),
 ]

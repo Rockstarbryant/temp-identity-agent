@@ -48,13 +48,14 @@ class RegistrationJobSerializer(serializers.ModelSerializer):
     provider = serializers.SerializerMethodField()
     model = serializers.SerializerMethodField()
     account_id = serializers.SerializerMethodField()
+    manual_available = serializers.SerializerMethodField()
 
     class Meta:
         model = RegistrationJob
         fields = [
             "id", "domain", "state", "identity_id", "error_code", "error_message",
             "provider", "model", "account_id", "kind", "source", "account_mode",
-            "created_at", "started_at", "completed_at",
+            "created_at", "started_at", "completed_at", "manual_available",
         ]
         read_only_fields = fields
 
@@ -71,6 +72,11 @@ class RegistrationJobSerializer(serializers.ModelSerializer):
     def get_model(self, obj) -> str:
         session = self._agent_session(obj)
         return session.model if session else ""
+
+    def get_manual_available(self, obj) -> bool:
+        from apps.registration.views import MANUAL_STATES
+
+        return obj.kind == RegistrationJob.Kind.REGISTRATION and obj.state in MANUAL_STATES
 
     def get_account_id(self, obj):
         try:

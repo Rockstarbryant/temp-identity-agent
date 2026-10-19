@@ -7,6 +7,7 @@ import {
   TemporaryAccountSummary, RevealedCredentials, isAuthenticated,
 } from "@/lib/api";
 import { invalidate } from "@/lib/cache";
+import MailboxPanel from "@/components/MailboxPanel";
 import { Loader2, Copy, Check, Eye, Trash2 } from "lucide-react";
 
 function CopyButton({ value }: { value: string }) {
@@ -73,9 +74,10 @@ export default function AccountDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-6">
+    <div className="mx-auto max-w-xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold">{account.domain}</h1>
+        {account.manual && <p className="mt-0.5 text-xs text-accent">Signed up manually</p>}
         <p className="text-xs text-black/40">{account.permanent ? "Permanent account (no expiry)" : `Expires ${new Date(account.expires_at).toLocaleString()}`}</p>
       </div>
 
@@ -107,6 +109,8 @@ export default function AccountDetailPage() {
           )}
         </div>
       </dl>
+
+      {account.status === "active" && <MailboxPanel accountId={id} />}
 
       {account.status !== "active" && (
         <p className="text-sm text-black/50">This account is {account.status} and can no longer be used.</p>

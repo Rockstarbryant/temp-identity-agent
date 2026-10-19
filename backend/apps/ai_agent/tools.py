@@ -343,11 +343,19 @@ def _handle_registration_mark_failed(ctx: AgentContext, args: RegistrationReason
     return {"state": ctx.job.state}
 
 
+def _capture_manual_kit(ctx: AgentContext) -> None:
+    if ctx.job.kind == RegistrationJob.Kind.REGISTRATION and ctx.identity is not None:
+        from apps.registration.manual import snapshot_into_job
+
+        snapshot_into_job(ctx)
+
+
 def _handle_registration_mark_captcha_required(ctx: AgentContext, args: RegistrationReasonArgs) -> dict:
     ctx.job.state = RegistrationJob.State.CAPTCHA_REQUIRED
     ctx.job.error_code = "CAPTCHA_REQUIRED"
     ctx.job.error_message = args.reason
     ctx.job.save(update_fields=["state", "error_code", "error_message", "updated_at"])
+    _capture_manual_kit(ctx)
     return {"state": ctx.job.state}
 
 
@@ -356,6 +364,7 @@ def _handle_registration_mark_human_action_required(ctx: AgentContext, args: Reg
     ctx.job.error_code = "HUMAN_ACTION_REQUIRED"
     ctx.job.error_message = args.reason
     ctx.job.save(update_fields=["state", "error_code", "error_message", "updated_at"])
+    _capture_manual_kit(ctx)
     return {"state": ctx.job.state}
 
 

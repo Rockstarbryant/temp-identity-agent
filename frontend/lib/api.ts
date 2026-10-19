@@ -122,6 +122,8 @@ export interface RegistrationJob {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  /** A CAPTCHA/manual step stopped the agent: the user can sign up by hand with the kit. */
+  manual_available?: boolean;
 }
 
 export interface PendingQuestion {
@@ -142,6 +144,7 @@ export interface RegistrationJobDetail extends RegistrationJob {
     note?: string;
     summary?: string;
     data?: Record<string, unknown>;
+    manual?: boolean;
   };
   auth_check: { email_password?: boolean; methods?: string[]; notes?: string };
   target_url: string;
@@ -158,6 +161,8 @@ export interface TemporaryAccountSummary {
   expires_at: string;
   created_at: string;
   permanent: boolean;
+  /** Signed up by hand using the manual sign-up kit. */
+  manual?: boolean;
 }
 
 export interface RevealedCredentials {
@@ -459,4 +464,143 @@ export async function approveOAuth(params: OAuthParams, approve: boolean) {
     method: "POST",
     body: JSON.stringify({ ...params, approve }),
   });
+}
+
+
+// --- Manual sign-up kit -------------------------------------------------------
+
+export interface ManualKitField {
+  label: string;
+  type: string;
+  required: boolean;
+  source: string;
+  options: string[];
+  group: string;
+  value: string;
+  secret: boolean;
+}
+
+export interface ManualKit {
+  url: string;
+  title: string;
+  domain: string;
+  fields: ManualKitField[];
+  email: string;
+  username: string;
+  password: string;
+}
+
+export async function getManualKit(jobId: string) {
+  return request<ManualKit>(`/api/registration-jobs/${jobId}/manual-kit/`, { method: "POST" });
+}
+
+export async function completeManualSignup(jobId: string, body: { username?: string; password?: string; note?: string }) {
+  return request<{ account_id: string; state: string }>(`/api/registration-jobs/${jobId}/manual-complete/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// --- Vault mailbox ---------------------------------------------------------------
+
+export interface MailboxInfo {
+  address: string;
+  status: "active" | "closed";
+  own_inbox: boolean;
+  expires_at: string | null;
+  last_checked_at: string | null;
+}
+
+export interface MailMessageSummary {
+  id: string;
+  sender: string;
+  subject: string;
+  snippet: string;
+  received_at: string | null;
+  read: boolean;
+  has_link: boolean;
+  has_code: boolean;
+}
+
+export interface MailMessage extends MailMessageSummary {
+  text: string;
+  links: string[];
+  verification_link: string;
+  code: string;
+}
+
+export interface Mailbox {
+  mailbox: MailboxInfo;
+  messages: MailMessageSummary[];
+  unread: number;
+  refresh_error: string;
+}
+
+export async function getMailbox(accountId: string, refresh = false) {
+  return request<Mailbox>(`/api/accounts/${accountId}/mailbox/${refresh ? "?refresh=1" : ""}`);
+}
+
+export async function getMailMessage(accountId: string, messageId: string) {
+  return request<MailMessage>(`/api/accounts/${accountId}/mailbox/messages/${messageId}/`);
+}
+
+export async function askMailbox(accountId: string, question: string) {
+  return request<{ answer: string; checked: number; new: number }>(`/api/accounts/${accountId}/mailbox/ask/`, {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}
+
+// --- Notifications -----------------------------------------------------------------
+
+export type NotificationKind =
+  | "job_started" | "job_completed" | "job_failed" | "job_cancelled" | "job_needs_you" | "job_question"
+  | "mail_received" | "account_expiring" | "account_expired" | "signin_issue" | "client_connected"
+  | "manual_saved" | "playbook_used";
+
+export interface AppNotification {
+  id: number;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  link: string;
+  data: Record<string, unknown>;
+  read: boolean;
+  created_at: string;
+}
+
+export async function listNotifications() {
+  return request<{ unread: number; results: AppNotification[] }>("/api/notifications/");
+}
+
+export async function markNotificationsRead(ids?: number[]) {
+  return request<{ unread: number }>("/api/notifications/read/", {
+    method: "POST",
+    body: JSON.stringify(ids ? { ids } : {}),
+  });
+}
+
+export async function deleteNotification(id: number) {
+  return request<void>(`/api/notifications/${id}/`, { method: "DELETE" });
+}
+
+export async function clearNotifications() {
+  return request<void>("/api/notifications/", { method: "DELETE" });
+}
+
+/**
+ * Opens the notification stream. EventSource can't send an Authorization header, so this reads
+ * the response body directly. Returns the Response (caller reads `body`), refreshing the token once on 401.
+ */
+export async function openNotificationStream(lastId: number | null, signal: AbortSignal): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = getAccessToken();
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (lastId !== null) headers["Last-Event-ID"] = String(lastId);
+    const res = await fetch(`${API_URL}/api/notifications/stream/`, { headers, signal, cache: "no-store" });
+    if (res.status === 401 && attempt === 0 && (await tryRefresh())) continue;
+    return res;
+  }
+  throw new ApiError(401, {});
 }

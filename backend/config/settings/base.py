@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.audit",
     "apps.profiles",
+    "apps.notifications",
     "apps.mcp_server",
 ]
 
@@ -81,26 +82,18 @@ ASGI_APPLICATION = "config.asgi.application"
 
 # --- Database ---------------------------------------------------------------
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://postgres:postgres@localhost:5432/temp_identity_agent",
-    )
+    "default": env.db("DATABASE_URL", default="postgres://postgres:postgres@localhost:5432/temp_identity_agent")
 }
 if DATABASES["default"]["ENGINE"].endswith("postgresql"):
-    # Managed Postgres / poolers silently drop idle SSL connections.
-    # CONN_MAX_AGE recycles before Neon closes them; health checks reopen
-    # a dead persistent connection before it is used; TCP keepalives keep
-    # the socket alive while idle.
-    DATABASES["default"]["CONN_MAX_AGE"] = 60
-    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+    # Managed Postgres / poolers silently drop idle SSL connections. TCP keepalives keep the
+    # socket alive, and health checks reopen a dead persistent connection before it is used.
     DATABASES["default"].setdefault("OPTIONS", {}).update({
-        "connect_timeout": 10,
         "keepalives": 1,
         "keepalives_idle": 30,
         "keepalives_interval": 10,
         "keepalives_count": 5,
-        "sslmode": "require",
     })
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 # --- Auth --------------------------------------------------------------------
 AUTH_USER_MODEL = "users.User"
@@ -145,6 +138,8 @@ REST_FRAMEWORK = {
         # Job creation launches a real browser + AI agent run — needs its
         # own, much tighter cap independent of general API usage.
         "registration_jobs": "10/hour",
+        # "Ask the agent about this mailbox" runs an AI call each time.
+        "mailbox_ask": "30/hour",
         # The live browser view polls about once a second while it is open.
         "live_view": "300/min",
         # External AI clients calling the MCP endpoint.
@@ -228,6 +223,14 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-registration-jobs": {
         "task": "apps.identities.tasks.expire_stale_registration_jobs",
         "schedule": 1800.0,  # every 30 minutes
+    },
+    "poll-mailboxes": {
+        "task": "apps.email_service.tasks.poll_mailboxes",
+        "schedule": 60.0,  # new mail -> notification
+    },
+    "remind-expiring-accounts": {
+        "task": "apps.notifications.tasks.remind_expiring_accounts",
+        "schedule": 3600.0,
     },
     "close-orphaned-browser-sessions": {
         "task": "apps.identities.tasks.close_orphaned_browser_sessions",

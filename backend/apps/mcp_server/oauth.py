@@ -207,6 +207,12 @@ class ApproveView(APIView):
         )
         AuditLog.objects.create(user=request.user, action="oauth.approved", resource_type="OAuthClient",
                                 resource_id=client.client_id, metadata={"client": client.name})
+        from apps.notifications.models import Notification
+        from apps.notifications.service import notify
+
+        notify(request.user, Notification.Kind.CLIENT_CONNECTED, f"{client.name} was connected",
+               "It can now start jobs for you. Revoke it in Settings if this wasn't you.", "/settings",
+               {"client": client.name})
         return Response({"redirect_url": _redirect_with(redirect_uri, code=code, state=state)})
 
 

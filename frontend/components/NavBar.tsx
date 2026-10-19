@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isAuthenticated, logout } from "@/lib/api";
+import NotificationBell from "@/components/NotificationBell";
+import { stopNotifications } from "@/lib/notifications";
 import { KeyRound, ListChecks, LogOut, Plus, Settings, ShieldCheck, UserRound } from "lucide-react";
 
 const ITEMS = [
@@ -24,6 +26,7 @@ export default function NavBar() {
 
   async function handleLogout() {
     await logout();
+    stopNotifications();
     setAuthed(false);
     router.push("/login");
   }
@@ -58,7 +61,8 @@ export default function NavBar() {
                   );
                 })}
               </nav>
-              <div className="ml-auto md:ml-0">
+              <div className="ml-auto flex items-center gap-1 md:ml-0">
+                <NotificationBell />
                 <button
                   onClick={handleLogout}
                   className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm text-black/50 hover:bg-red-50 hover:text-red-600"
