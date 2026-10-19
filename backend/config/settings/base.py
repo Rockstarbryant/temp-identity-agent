@@ -81,18 +81,26 @@ ASGI_APPLICATION = "config.asgi.application"
 
 # --- Database ---------------------------------------------------------------
 DATABASES = {
-    "default": env.db("DATABASE_URL", default="postgres://postgres:postgres@localhost:5432/temp_identity_agent")
+    "default": env.db(
+        "DATABASE_URL",
+        default="postgres://postgres:postgres@localhost:5432/temp_identity_agent",
+    )
 }
 if DATABASES["default"]["ENGINE"].endswith("postgresql"):
-    # Managed Postgres / poolers silently drop idle SSL connections. TCP keepalives keep the
-    # socket alive, and health checks reopen a dead persistent connection before it is used.
+    # Managed Postgres / poolers silently drop idle SSL connections.
+    # CONN_MAX_AGE recycles before Neon closes them; health checks reopen
+    # a dead persistent connection before it is used; TCP keepalives keep
+    # the socket alive while idle.
+    DATABASES["default"]["CONN_MAX_AGE"] = 60
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
     DATABASES["default"].setdefault("OPTIONS", {}).update({
+        "connect_timeout": 10,
         "keepalives": 1,
         "keepalives_idle": 30,
         "keepalives_interval": 10,
         "keepalives_count": 5,
+        "sslmode": "require",
     })
-    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 # --- Auth --------------------------------------------------------------------
 AUTH_USER_MODEL = "users.User"
