@@ -11,6 +11,7 @@ import { stopNotifications } from "@/lib/notifications";
 import NotificationBell from "@/components/NotificationBell";
 import { buttonClass } from "@/components/ui/Button";
 import ThemeToggle from "@/components/ui/ThemeToggle";
+import InstallButton from "@/components/pwa/InstallButton";
 import { cn } from "@/components/ui/cn";
 
 interface NavItem {
@@ -174,6 +175,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <div className="md:hidden"><Brand /></div>
             <div className="hidden md:block" />
             <div className="flex items-center gap-1">
+              <InstallButton />
               <ThemeToggle />
               <NotificationBell />
               <button

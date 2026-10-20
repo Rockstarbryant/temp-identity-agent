@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Offline - Temp Identity Agent</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+           font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; background: #FAFAFA; color: #171717; }
+    main { max-width: 22rem; padding: 1.5rem; text-align: center; }
+    h1 { font-size: 1.125rem; margin: 0 0 .5rem; }
+    p { font-size: .875rem; color: #737373; margin: 0 0 1.25rem; line-height: 1.5; }
+    button { font: inherit; font-weight: 500; padding: .625rem 1rem; border: 0; border-radius: 6px; background: #4F46E5; color: #fff; cursor: pointer; }
+    button:focus-visible { outline: 2px solid #6366F1; outline-offset: 2px; }
+    @media (prefers-color-scheme: dark) { body { background: #0A0A0A; color: #EDEDED; } p { color: #A3A3A3; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>You are offline</h1>
+    <p>Temp Identity Agent needs a connection to reach your tasks, vault and mailboxes. For your security, none of that is stored on this device.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>

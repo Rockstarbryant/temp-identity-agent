@@ -9,36 +9,14 @@ import {
   type ProfileData,
 } from "@/lib/api";
 import { invalidate } from "@/lib/cache";
+import { isGoogleForm, normalizeUrl, stripDirectPrefix } from "@/lib/directLink";
 import { useCachedData } from "@/lib/useCachedData";
 import { timeAgo } from "@/lib/format";
 import StateBadge from "@/components/StateBadge";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { InlineMessage } from "@/components/ui/States";
+import CopyButton from "@/components/ui/CopyButton";
 import { cn } from "@/components/ui/cn";
-
-function isGoogleForm(raw: string) {
-  try {
-    const u = new URL(raw);
-    return (u.hostname === "docs.google.com" && u.pathname.startsWith("/forms")) || u.hostname === "forms.gle";
-  } catch {
-    return false;
-  }
-}
-
-/** Accepts "example.com/signup" as well as full URLs. Returns null when it is not a usable http(s) URL. */
-function normalizeUrl(raw: string): string | null {
-  const text = raw.trim();
-  if (!text) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`;
-  try {
-    const u = new URL(withScheme);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-    if (!u.hostname.includes(".") && u.hostname !== "localhost") return null;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
 
 const MODES: { mode: AccountMode; title: string; text: string; icon: typeof Hourglass }[] = [
   { mode: "temporary", title: "Temporary identity", text: "Throwaway name and disposable inbox. Nothing links back to you.", icon: Hourglass },
@@ -55,6 +33,10 @@ export default function HomePage() {
   const [savingMode, setSavingMode] = useState<AccountMode | null>(null);
   const [modeError, setModeError] = useState<string | null>(null);
   const inFlight = useRef(false);
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   // Read after mount so server and client markup match.
   const [signedIn, setSignedIn] = useState(false);
@@ -65,7 +47,7 @@ export default function HomePage() {
   const { data: profile, mutate: mutateProfile } = useCachedData<ProfileData>(signedIn ? "profile" : null, getProfile);
   const { data: jobs } = useCachedData(signedIn ? "jobs" : null, async () => (await listRegistrationJobs()).results);
 
-  const form = isGoogleForm(url.trim());
+  const form = isGoogleForm(stripDirectPrefix(url).trim());
   const mode = profile?.account_mode;
   const recent = (jobs ?? []).slice(0, 5);
 
@@ -94,7 +76,7 @@ export default function HomePage() {
       router.push("/login?next=/");
       return;
     }
-    const normalized = normalizeUrl(url);
+    const normalized = normalizeUrl(stripDirectPrefix(url));
     if (!normalized) {
       setError("Enter a valid website address, for example https://example.com/signup.");
       return;
@@ -165,7 +147,7 @@ export default function HomePage() {
         <p id="task-url-help" className="mt-2 text-xs text-muted">
           {form
             ? "Google Form detected. The agent reads the form, uses your saved details, asks about anything it cannot answer, submits it, and shows exactly what it sent."
-            : "Registration pages and Google Forms are supported."}
+            : "Registration pages and Google Forms are supported. You can also type @direct before an address."}
         </p>
 
         {/* Identity type: the saved default, changeable here. */}
@@ -231,6 +213,19 @@ export default function HomePage() {
           </div>
         )}
       </form>
+
+      {signedIn && origin && (
+        <div className="mt-4 rounded-lg border border-line bg-surface px-4 py-3">
+          <p className="text-xs font-medium">Shortcut</p>
+          <p className="mt-0.5 text-xs text-muted">
+            Skip this page: put the site after this prefix in your browser&apos;s address bar. You will be asked to confirm before anything starts.
+          </p>
+          <div className="mt-2 flex items-center gap-1">
+            <code className="min-w-0 break-all rounded bg-subtle px-1.5 py-0.5 font-mono text-xs">{origin}/@direct/https://example.com</code>
+            <CopyButton value={`${origin}/@direct/`} label="shortcut prefix" />
+          </div>
+        </div>
+      )}
 
       <section aria-labelledby="recent-heading" className="mt-8">
         <div className="mb-2 flex items-center justify-between">
