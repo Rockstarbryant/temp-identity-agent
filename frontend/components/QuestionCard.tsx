@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { HelpCircle, Loader2, Lock } from "lucide-react";
+import { Eye, EyeOff, HelpCircle, Lock } from "lucide-react";
 import { ApiError, PendingQuestion, answerQuestion } from "@/lib/api";
+import Button from "@/components/ui/Button";
+import Field from "@/components/ui/Field";
+import { InlineMessage } from "@/components/ui/States";
+import { cn } from "@/components/ui/cn";
 
 interface Props {
   jobId: string;
@@ -10,10 +14,14 @@ interface Props {
   onDone: () => void;
 }
 
-/** The agent needs a detail from the user. It waits (browser still open) until this is answered or skipped. */
+/**
+ * The agent needs a detail only the user has. The task waits until this is answered or skipped.
+ * Sensitive questions use a masked field, and their answers are hidden from the task timeline.
+ */
 export default function QuestionCard({ jobId, question, onDone }: Props) {
   const [answer, setAnswer] = useState("");
   const [remember, setRemember] = useState(!question.sensitive && !!question.key);
+  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState<"answer" | "skip" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,64 +40,79 @@ export default function QuestionCard({ jobId, question, onDone }: Props) {
     }
   }
 
+  const legendId = `q-${question.id}`;
+
   return (
     <form
-      onSubmit={(e) => { e.preventDefault(); send(false); }}
-      className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-4"
+      onSubmit={(e) => { e.preventDefault(); void send(false); }}
+      className="space-y-3 rounded-lg border border-warning-line bg-warning-soft p-4"
     >
-      <div className="flex items-center gap-2 font-medium text-amber-900">
-        <HelpCircle className="h-4 w-4" /> The agent needs a detail from you
+      <div className="flex items-center gap-2 text-sm font-semibold text-warning">
+        <HelpCircle className="h-4 w-4" aria-hidden="true" /> The agent needs a detail from you
       </div>
-      <p className="text-sm text-amber-900">{question.question}</p>
+      <p id={legendId} className="text-sm text-ink">{question.question}</p>
 
       {question.options.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby={legendId}>
           {question.options.map((o) => (
             <button
-              type="button" key={o} onClick={() => setAnswer(o)}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                answer === o ? "border-accent bg-accent text-white" : "border-black/15 bg-white hover:bg-black/5"
-              }`}
+              type="button" key={o} role="radio" aria-checked={answer === o} onClick={() => setAnswer(o)}
+              className={cn(
+                "rounded-md border px-3 py-1.5 text-sm transition-colors",
+                answer === o ? "border-accent-strong bg-accent-strong text-white" : "border-line-strong bg-surface hover:bg-subtle",
+              )}
             >
               {o}
             </button>
           ))}
         </div>
       ) : (
-        <div className="relative">
-          {question.sensitive && <Lock className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-black/30" />}
-          <input
-            autoFocus value={answer} onChange={(e) => setAnswer(e.target.value)} maxLength={1000}
-            placeholder="Your answer" autoComplete="off"
-            className={`w-full rounded-md border border-black/15 bg-white py-2 pr-3 text-sm ${question.sensitive ? "pl-8" : "pl-3"}`}
-          />
-        </div>
+        <Field
+          label="Your answer"
+          hideLabel
+          autoFocus
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          maxLength={1000}
+          placeholder="Your answer"
+          autoComplete="off"
+          type={question.sensitive && !show ? "password" : "text"}
+          trailing={
+            question.sensitive ? (
+              <button
+                type="button" onClick={() => setShow((s) => !s)}
+                aria-label={show ? "Hide answer" : "Show answer"}
+                className="rounded p-1.5 text-muted hover:bg-subtle hover:text-ink"
+              >
+                {show ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+              </button>
+            ) : undefined
+          }
+        />
       )}
 
       {question.key && (
-        <label className="flex items-center gap-2 text-xs text-amber-900">
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          Remember this next time
-          {question.sensitive && <span className="text-amber-900/70">(stored encrypted)</span>}
+        <label className="flex items-center gap-2 text-xs text-ink">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 accent-accent-strong" />
+          Remember this for next time
+          {question.sensitive && <span className="text-muted">(stored encrypted)</span>}
         </label>
       )}
-      {question.sensitive && <p className="text-xs text-amber-900/70">This answer is hidden in the job timeline.</p>}
+      {question.sensitive && (
+        <p className="flex items-center gap-1.5 text-xs text-muted">
+          <Lock className="h-3 w-3" aria-hidden="true" /> This answer is hidden in the task timeline.
+        </p>
+      )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="submit" disabled={busy !== null || !answer.trim()}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-50"
-        >
-          {busy === "answer" && <Loader2 className="h-4 w-4 animate-spin" />} Send answer
-        </button>
-        <button
-          type="button" onClick={() => send(true)} disabled={busy !== null}
-          className="text-sm text-amber-900/80 underline disabled:opacity-50"
-        >
-          {busy === "skip" ? "Skipping…" : "I'd rather not say"}
-        </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" variant="primary" loading={busy === "answer"} disabled={busy !== null || !answer.trim()}>
+          Send answer
+        </Button>
+        <Button variant="ghost" onClick={() => void send(true)} loading={busy === "skip"} disabled={busy !== null}>
+          I would rather not say
+        </Button>
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <InlineMessage tone="danger">{error}</InlineMessage>}
     </form>
   );
 }

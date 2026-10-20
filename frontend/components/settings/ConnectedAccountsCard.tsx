@@ -2,10 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Loader2, LogIn, Plus, Trash2 } from "lucide-react";
+import { LogIn, Plus, Trash2 } from "lucide-react";
 import {
   AccountProvider, ApiError, ConnectedAccount, removeConnectedAccount, saveConnectedAccount, startAccountSignIn,
 } from "@/lib/api";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Field from "@/components/ui/Field";
+import { InlineMessage } from "@/components/ui/States";
+import { useConfirm } from "@/components/ui/Feedback";
+import { cn } from "@/components/ui/cn";
+import { formatDateTime } from "@/lib/format";
 import Section from "./Section";
 
 const NAMES: Record<AccountProvider, string> = { google: "Google", microsoft: "Microsoft" };
@@ -17,6 +24,7 @@ interface Props {
 
 export default function ConnectedAccountsCard({ accounts, onChange }: Props) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [provider, setProvider] = useState<AccountProvider>("google");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,7 +71,13 @@ export default function ConnectedAccountsCard({ accounts, onChange }: Props) {
   }
 
   async function remove(p: AccountProvider) {
-    if (!confirm(`Remove this ${NAMES[p]} account from the agent? Its saved password and sign-in are erased.`)) return;
+    const ok = await confirm({
+      title: `Remove the ${NAMES[p]} account?`,
+      description: "Its saved password and sign-in session are erased from this app. The account itself is not deleted at " + NAMES[p] + ".",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(`remove-${p}`);
     setError(null);
     try {
@@ -79,81 +93,60 @@ export default function ConnectedAccountsCard({ accounts, onChange }: Props) {
   return (
     <Section
       title="Accounts for forms that need a sign-in"
-      hint="Some Google and Microsoft forms only accept signed-in people. Give the agent a separate account made just for this, never your main one. Passwords and sign-ins are encrypted and are never shown to the AI."
+      hint="Some Google and Microsoft forms only accept signed-in people. Give the agent a separate account made just for this, never your main one. Passwords and sessions are encrypted and never shown to the AI. These are not the temporary identities the agent creates, and they are not your email connection."
     >
       <div className="space-y-4">
         {accounts.map((a) => (
-          <div key={a.provider} className="space-y-2 rounded-md border border-black/10 p-3">
+          <div key={a.provider} className="space-y-2.5 rounded-md border border-line p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wide text-black/40">{NAMES[a.provider]}</p>
-                <p className="break-all text-sm font-medium">{a.email}</p>
+                <p className="text-xs font-medium text-muted">{NAMES[a.provider]}</p>
+                <p className="break-all font-mono text-sm">{a.email}</p>
               </div>
-              {a.signed_in ? (
-                <span className="flex shrink-0 items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs text-green-700">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Signed in
-                </span>
-              ) : (
-                <span className="shrink-0 rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/55">Not signed in yet</span>
-              )}
+              <Badge tone={a.signed_in ? "success" : "neutral"}>{a.signed_in ? "Signed in" : "Not signed in"}</Badge>
             </div>
-            <p className="text-xs text-black/50">
-              {a.has_password ? "Password saved, so the agent can sign in again when needed." : "No password saved: you sign in yourself when asked."}
-              {a.session_saved_at && ` · signed in ${new Date(a.session_saved_at).toLocaleString()}`}
+            <p className="text-xs text-muted">
+              {a.has_password ? "A password is saved, so the agent can sign in again when needed." : "No password saved. You sign in yourself when asked."}
+              {a.session_saved_at && ` Signed in ${formatDateTime(a.session_saved_at)}.`}
             </p>
-            {a.last_error && <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">{a.last_error}</p>}
+            {a.last_error && <InlineMessage tone="warning">{a.last_error}</InlineMessage>}
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => signIn(a.provider)} disabled={busy !== null}
-                className="flex items-center gap-1.5 rounded-md border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-50"
-              >
-                {busy === `signin-${a.provider}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              <Button onClick={() => void signIn(a.provider)} loading={busy === `signin-${a.provider}`} disabled={busy !== null}>
+                {busy !== `signin-${a.provider}` && <LogIn className="h-4 w-4" aria-hidden="true" />}
                 {a.signed_in ? "Sign in again" : "Sign in now"}
-              </button>
-              <button
-                onClick={() => remove(a.provider)} disabled={busy !== null}
-                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-black/60 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-              >
-                {busy === `remove-${a.provider}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Remove
-              </button>
+              </Button>
+              <Button variant="danger-ghost" onClick={() => void remove(a.provider)} loading={busy === `remove-${a.provider}`} disabled={busy !== null}>
+                {busy !== `remove-${a.provider}` && <Trash2 className="h-4 w-4" aria-hidden="true" />} Remove
+              </Button>
             </div>
           </div>
         ))}
 
         <form onSubmit={add} className="space-y-3">
-          <p className="text-sm font-medium">{accounts.length ? "Add or update an account" : "Add an account"}</p>
-          <div className="flex gap-2">
+          <h3 className="text-sm font-semibold">{accounts.length ? "Add or update an account" : "Add an account"}</h3>
+          <div role="radiogroup" aria-label="Provider" className="flex gap-2">
             {(["google", "microsoft"] as AccountProvider[]).map((p) => (
               <button
-                type="button" key={p} onClick={() => setProvider(p)}
-                className={`rounded-md border px-3 py-1.5 text-sm ${provider === p ? "border-accent bg-accent/5 font-medium" : "border-black/15 hover:bg-black/5"}`}
+                type="button" key={p} role="radio" aria-checked={provider === p} onClick={() => setProvider(p)}
+                className={cn(
+                  "rounded-md border px-3 py-1.5 text-sm transition-colors",
+                  provider === p ? "border-accent bg-accent-soft font-medium" : "border-line-strong hover:bg-subtle",
+                )}
               >
                 {NAMES[p]}
               </button>
             ))}
           </div>
-          <input
-            type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder={`${NAMES[provider]} account email`} autoComplete="off"
-            className="w-full rounded-md border border-black/15 px-3 py-2 text-sm"
+          <Field label={`${NAMES[provider]} account email`} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" mono />
+          <Field
+            label="Password (optional)" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password" hint="Leave blank to keep the saved password. Without one, you sign in yourself in the browser preview each time."
           />
-          <input
-            type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password (optional, leave blank to keep the saved one)" autoComplete="new-password"
-            className="w-full rounded-md border border-black/15 px-3 py-2 text-sm"
-          />
-          <p className="text-xs text-black/50">
-            Without a password the agent will ask you to sign in through the live browser each time. Google may also ask
-            for a verification step; you can complete it there.
-          </p>
-          <button
-            type="submit" disabled={busy !== null || !email}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-50"
-          >
-            {busy === "add" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Save account
-          </button>
+          <Button type="submit" variant="primary" loading={busy === "add"} disabled={busy !== null || !email}>
+            {busy !== "add" && <Plus className="h-4 w-4" aria-hidden="true" />} Save account
+          </Button>
         </form>
-        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+        {error && <InlineMessage tone="danger">{error}</InlineMessage>}
       </div>
     </Section>
   );

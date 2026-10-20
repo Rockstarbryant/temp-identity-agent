@@ -1,109 +1,70 @@
 "use client";
 
-import Link from "next/link";
+import { Bell, Trash2 } from "lucide-react";
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import {
-  AlertTriangle, Bell, CheckCircle2, Clock, KeyRound, Mail, Play, Plug, Trash2, X, XCircle, Zap,
-} from "lucide-react";
-import { AppNotification, NotificationKind, isAuthenticated } from "@/lib/api";
-import {
-  markRead, refreshNotifications, removeAllNotifications, removeNotification,
-  startNotifications, useNotifications,
-} from "@/lib/notifications";
+import { markRead, refreshNotifications, removeAllNotifications, startNotifications, useNotifications } from "@/lib/notifications";
+import { useRequireAuth } from "@/lib/useRequireAuth";
+import NotificationRow from "@/components/notifications/NotificationRow";
+import Button from "@/components/ui/Button";
+import PageHeader from "@/components/ui/PageHeader";
+import { EmptyState, PageSpinner } from "@/components/ui/States";
+import { useConfirm, useToast } from "@/components/ui/Feedback";
 
-const ICONS: Record<NotificationKind, { icon: typeof Bell; tone: string }> = {
-  job_started: { icon: Play, tone: "text-blue-600" },
-  job_completed: { icon: CheckCircle2, tone: "text-green-600" },
-  job_failed: { icon: XCircle, tone: "text-red-600" },
-  job_cancelled: { icon: X, tone: "text-black/50" },
-  job_needs_you: { icon: AlertTriangle, tone: "text-amber-600" },
-  job_question: { icon: AlertTriangle, tone: "text-amber-600" },
-  mail_received: { icon: Mail, tone: "text-accent" },
-  account_expiring: { icon: Clock, tone: "text-amber-600" },
-  account_expired: { icon: Clock, tone: "text-black/50" },
-  signin_issue: { icon: AlertTriangle, tone: "text-red-600" },
-  client_connected: { icon: Plug, tone: "text-accent" },
-  manual_saved: { icon: KeyRound, tone: "text-green-600" },
-  playbook_used: { icon: Zap, tone: "text-accent" },
-};
-
-function ago(iso: string): string {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function Row({ n }: { n: AppNotification }) {
-  const { icon: Icon, tone } = ICONS[n.kind] ?? { icon: Bell, tone: "text-black/50" };
-  const body = (
-    <div className="flex min-w-0 flex-1 items-start gap-3">
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} />
-      <div className="min-w-0">
-        <p className={`break-words text-sm ${n.read ? "text-black/70" : "font-medium text-ink"}`}>{n.title}</p>
-        {n.body && <p className="mt-0.5 break-words text-xs text-black/50">{n.body}</p>}
-        <p className="mt-1 text-[11px] text-black/40">{ago(n.created_at)}</p>
-      </div>
-    </div>
-  );
-  return (
-    <li className={`flex items-start gap-2 rounded-md border px-3 py-2.5 ${n.read ? "border-black/10 bg-white" : "border-accent/30 bg-accent/5"}`}>
-      {n.link ? (
-        <Link href={n.link} onClick={() => !n.read && markRead([n.id])} className="flex min-w-0 flex-1">
-          {body}
-        </Link>
-      ) : (
-        body
-      )}
-      <button onClick={() => removeNotification(n.id)} className="rounded p-1 text-black/30 hover:bg-black/5 hover:text-red-600" aria-label="Dismiss">
-        <X className="h-4 w-4" />
-      </button>
-    </li>
-  );
-}
-
+/** Full history. Uses the same single notification store and stream as the header drawer. */
 export default function NotificationsPage() {
+  const ready = useRequireAuth();
   const { items, unread, loaded, connected } = useNotifications();
-  const router = useRouter();
+  const confirm = useConfirm();
+  const toast = useToast();
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login?next=/notifications");
-      return;
-    }
-    startNotifications();
+    if (!ready) return;
+    startNotifications(); // no-op if the header bell already started it
     void refreshNotifications();
-  }, [router]);
+  }, [ready]);
+
+  async function clearAll() {
+    const ok = await confirm({
+      title: "Clear all notifications?",
+      description: "This deletes your notification history. It does not affect your tasks or accounts.",
+      confirmLabel: "Clear all",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await removeAllNotifications();
+    } catch {
+      toast.error("Could not clear notifications.");
+    }
+  }
+
+  if (!ready) return <PageSpinner />;
 
   return (
-    <div className="mx-auto max-w-xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-semibold">Notifications</h1>
-          <p className="text-xs text-black/40">{connected ? "Live: new events appear here as they happen." : "Reconnecting…"}</p>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          {unread > 0 && (
-            <button onClick={() => markRead()} className="text-accent hover:underline">Mark all read</button>
-          )}
-          {items.length > 0 && (
-            <button onClick={() => confirm("Clear all notifications?") && removeAllNotifications()} className="flex items-center gap-1 text-black/50 hover:text-red-600">
-              <Trash2 className="h-4 w-4" /> Clear
-            </button>
-          )}
-        </div>
-      </div>
-
-      {loaded && items.length === 0 && (
-        <p className="rounded-md border border-dashed border-black/15 p-6 text-center text-sm text-black/40">
-          Nothing yet. You&apos;ll see new mail in your vault mailboxes, finished jobs and anything that needs you here.
-        </p>
+    <div className="mx-auto max-w-2xl">
+      <PageHeader
+        title="Notifications"
+        description={connected ? "Receiving updates as they happen." : "Reconnecting to updates."}
+        actions={
+          <>
+            {unread > 0 && <Button onClick={() => void markRead().catch(() => toast.error("Could not mark as read."))}>Mark all read</Button>}
+            {items.length > 0 && (
+              <Button variant="danger-ghost" onClick={clearAll}><Trash2 className="h-4 w-4" aria-hidden="true" /> Clear all</Button>
+            )}
+          </>
+        }
+      />
+      {!loaded ? (
+        <PageSpinner />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<Bell className="h-4 w-4" aria-hidden="true" />}
+          title="No notifications"
+          description="Finished tasks, new mail in your mailboxes and anything that needs you will show up here."
+        />
+      ) : (
+        <ul className="space-y-2">{items.map((n) => <NotificationRow key={n.id} n={n} />)}</ul>
       )}
-      <ul className="space-y-2">
-        {items.map((n) => <Row key={n.id} n={n} />)}
-      </ul>
     </div>
   );
 }

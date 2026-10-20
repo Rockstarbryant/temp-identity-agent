@@ -50,6 +50,7 @@ async function request<T>(path: string, options: RequestInit = {}, retry = true)
   if (res.status === 401 && retry) {
     const refreshed = await tryRefresh();
     if (refreshed) return request<T>(path, options, false);
+    if (refreshRejected) handleSessionExpired(path);
   }
 
   if (!res.ok) {
@@ -60,16 +61,41 @@ async function request<T>(path: string, options: RequestInit = {}, retry = true)
   return res.json();
 }
 
+/** True only when the server explicitly rejected the refresh token (not on a network error). */
+let refreshRejected = false;
+
+/**
+ * The session is over: drop the tokens and send the user to log in, remembering where they were.
+ * Auth endpoints are excluded so a wrong password on the login form does not trigger a redirect.
+ */
+function handleSessionExpired(path: string) {
+  if (typeof window === "undefined" || path.startsWith("/api/auth/")) return;
+  if (!getAccessToken() && !getRefreshToken()) return;
+  clearTokens();
+  clearCache();
+  const here = window.location.pathname + window.location.search;
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.assign(`/login?next=${encodeURIComponent(here)}`);
+  }
+}
+
 async function tryRefresh(): Promise<boolean> {
   const refresh = getRefreshToken();
-  if (!refresh) return false;
+  refreshRejected = false;
+  if (!refresh) {
+    refreshRejected = true; // an access token with nothing to renew it: the session is over
+    return false;
+  }
   try {
     const res = await fetch(`${API_URL}/api/auth/refresh/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      refreshRejected = res.status === 400 || res.status === 401 || res.status === 403;
+      return false;
+    }
     const data = await res.json();
     window.localStorage.setItem("tia_access_token", data.access);
     return true;

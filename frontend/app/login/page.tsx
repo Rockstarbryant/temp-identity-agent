@@ -1,14 +1,19 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { login, ApiError } from "@/lib/api";
-import { Loader2 } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
+import { ApiError, login } from "@/lib/api";
+import { safeNextPath } from "@/lib/useRequireAuth";
+import Button from "@/components/ui/Button";
+import Field from "@/components/ui/Field";
+import { InlineMessage, PageSpinner } from "@/components/ui/States";
 
 function LoginForm() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -16,13 +21,18 @@ function LoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return;
     setError(null);
     setLoading(true);
     try {
       await login(username, password);
-      router.push(searchParams.get("next") || "/dashboard");
+      router.push(safeNextPath(searchParams.get("next")));
     } catch (err) {
-      setError(err instanceof ApiError ? "Invalid username or password." : "Something went wrong.");
+      setError(
+        err instanceof ApiError
+          ? err.status === 429 ? "Too many attempts. Wait a minute and try again." : "Invalid username or password."
+          : "Could not reach the server. Check your connection and try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -30,29 +40,27 @@ function LoginForm() {
 
   return (
     <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-xl font-semibold">Log in</h1>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <input
-          type="text" required placeholder="Username" value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="rounded-md border border-black/15 px-4 py-2.5 text-sm outline-none focus:border-accent"
+      <h1 className="text-xl font-semibold tracking-tight">Log in</h1>
+      <p className="mt-1 text-sm text-muted">Welcome back to Temp Identity Agent.</p>
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4 rounded-lg border border-line bg-surface p-5">
+        <Field label="Username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" />
+        <Field
+          label="Password" required type={show ? "text" : "password"} value={password}
+          onChange={(e) => setPassword(e.target.value)} autoComplete="current-password"
+          trailing={
+            <button
+              type="button" onClick={() => setShow((s) => !s)} aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
+              className="rounded p-1.5 text-muted hover:bg-subtle hover:text-ink"
+            >
+              {show ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          }
         />
-        <input
-          type="password" required placeholder="Password" value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded-md border border-black/15 px-4 py-2.5 text-sm outline-none focus:border-accent"
-        />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit" disabled={loading}
-          className="flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
-        >
-          {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-          Log in
-        </button>
+        {error && <InlineMessage tone="danger">{error}</InlineMessage>}
+        <Button type="submit" variant="primary" loading={loading} className="w-full">Log in</Button>
       </form>
-      <p className="mt-4 text-sm text-black/60">
-        No account? <Link href="/register" className="text-accent hover:underline">Sign up</Link>
+      <p className="mt-4 text-center text-sm text-muted">
+        No account? <Link href="/register" className="text-accent-strong underline">Sign up</Link>
       </p>
     </div>
   );
@@ -60,7 +68,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+    <Suspense fallback={<PageSpinner />}>
       <LoginForm />
     </Suspense>
   );

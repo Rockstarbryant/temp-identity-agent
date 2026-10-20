@@ -1,364 +1,330 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  getRegistrationJob, resumeRegistrationJob, cancelRegistrationJob, retryRegistrationJob,
-  deleteRegistrationJob, getAccount, revealCredentials,
-  isAuthenticated, ApiError, RegistrationStep, RevealedCredentials,
+  AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, KeyRound, RotateCcw, Trash2, XCircle,
+} from "lucide-react";
+import {
+  ApiError, deleteRegistrationJob, cancelRegistrationJob, getAccount, getRegistrationJob, resumeRegistrationJob,
+  retryRegistrationJob,
 } from "@/lib/api";
 import { invalidate } from "@/lib/cache";
 import { useCachedData } from "@/lib/useCachedData";
+import { useRequireAuth } from "@/lib/useRequireAuth";
+import {
+  RESUMABLE_STATES, TERMINAL_STATES, canCancel, canDismiss, canRetry, friendlyJobError, mayHaveSubmitted,
+  statusMeta, taskTypeLabel,
+} from "@/lib/jobStatus";
+import { formatDateTime, isSafeHttpUrl } from "@/lib/format";
 import StateBadge from "@/components/StateBadge";
 import AiBadge from "@/components/AiBadge";
 import LiveBrowser from "@/components/LiveBrowser";
 import QuestionCard from "@/components/QuestionCard";
 import ManualKit from "@/components/ManualKit";
-import {
-  CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight, RotateCcw, Trash2,
-  Copy, Check, Eye, KeyRound,
-} from "lucide-react";
+import Timeline from "@/components/job/Timeline";
+import CredentialsPanel from "@/components/vault/CredentialsPanel";
+import Badge from "@/components/ui/Badge";
+import Button, { buttonClass } from "@/components/ui/Button";
+import { Panel } from "@/components/ui/Card";
+import { EmptyState, ErrorState, InlineMessage, PageSpinner } from "@/components/ui/States";
+import { useConfirm, useToast } from "@/components/ui/Feedback";
 
-const TERMINAL = new Set(["completed", "failed", "cancelled", "expired"]);
-const RESUMABLE = new Set(["captcha_required", "human_action_required"]);
-const RETRYABLE = new Set(["failed", "cancelled", "expired"]);
-
-// Fallback wording when a step has no detail (steps recorded before details existed).
-const FALLBACK_LABELS: Record<string, string> = {
-  "playbook.replay": "Used the steps saved from an earlier sign-up",
-  "browser.open": "Opened the registration page",
-  "browser.inspect": "Looked at the page",
-  "browser.click": "Clicked a button",
-  "browser.type": "Filled in a field",
-  "browser.select": "Selected an option",
-  "browser.scroll": "Scrolled the page",
-  "browser.go_back": "Went back a page",
-  "identity.create": "Created a temporary identity",
-  "identity.get": "Checked identity details",
-  "email.get_mailbox": "Checked the temporary mailbox",
-  "email.list_messages": "Checked for new emails",
-  "email.read_message": "Read a message",
-  "email.wait_for_verification": "Waited for a verification email",
-  "browser.read_text": "Read the text on the page",
-  "profile.get": "Looked up your saved details",
-  "user.ask": "Asked you for a detail",
-  "site.report_auth_methods": "Checked how the site lets you sign in",
-  "form.complete": "Submitted the form",
-  "data.submit_result": "Saved the extracted information",
-  "registration.get_status": "Checked job status",
-  "registration.mark_complete": "Marked registration complete",
-  "registration.mark_failed": "Registration could not be completed",
-  "registration.mark_captcha_required": "Hit a CAPTCHA — needs you",
-  "registration.mark_human_action_required": "Needs manual action from you",
-};
-
-const PAUSE_TITLES: Record<string, string> = {
-  "registration.mark_captcha_required": "Hit a CAPTCHA",
-  "registration.mark_human_action_required": "Needs manual action",
-};
-
-function stepText(step: RegistrationStep): string {
-  const base = FALLBACK_LABELS[step.action] || step.action;
-  if (!step.detail) return step.success ? base : `${base} (failed)`;
-  const title = PAUSE_TITLES[step.action];
-  return title ? `${title} — ${step.detail}` : step.detail;
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-      className="rounded-md p-1.5 text-black/40 hover:bg-black/5 hover:text-accent"
-      aria-label={`Copy ${label}`}
-    >
-      {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-    </button>
-  );
-}
-
-/** Shown when a job completes: the credentials right here, plus a link to the vault. */
+/** The finished account: credentials right here, with the vault as the permanent home. */
 function CredentialsCard({ accountId, domain }: { accountId: string; domain: string }) {
-  const { data: account } = useCachedData(`account:${accountId}`, () => getAccount(accountId));
-  const [revealed, setRevealed] = useState<RevealedCredentials | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function reveal() {
-    setBusy(true);
-    setError(null);
-    try {
-      setRevealed(await revealCredentials(accountId));
-    } catch {
-      setError("Could not reveal the password. Open it from your vault instead.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const { data: account, error } = useCachedData(`account:${accountId}`, () => getAccount(accountId));
   return (
-    <div className="rounded-md border border-green-200 bg-green-50 p-4">
-      <div className="flex items-center gap-2 font-medium text-green-800">
-        <CheckCircle2 className="h-4 w-4" /> Your {domain} account is ready
-      </div>
+    <section className="space-y-3 rounded-lg border border-success-line bg-success-soft p-4">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-success">
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Your <span className="font-mono">{domain}</span> account is ready
+      </h2>
       {account ? (
-        <dl className="mt-3 space-y-2 rounded-md bg-white p-3 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <dt className="text-black/50">Email</dt>
-            <dd className="flex min-w-0 items-center gap-1 font-mono"><span className="truncate">{account.email}</span><CopyButton value={account.email} label="email" /></dd>
-          </div>
-          {account.username && (
-            <div className="flex items-center justify-between gap-2">
-              <dt className="text-black/50">Username</dt>
-              <dd className="flex min-w-0 items-center gap-1 font-mono"><span className="truncate">{account.username}</span><CopyButton value={account.username} label="username" /></dd>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-2">
-            <dt className="text-black/50">Password</dt>
-            {revealed ? (
-              <dd className="flex min-w-0 items-center gap-1 font-mono"><span className="truncate">{revealed.password}</span><CopyButton value={revealed.password} label="password" /></dd>
-            ) : (
-              <dd>
-                <button
-                  onClick={reveal} disabled={busy}
-                  className="flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />} Show password
-                </button>
-              </dd>
-            )}
-          </div>
-        </dl>
+        <CredentialsPanel account={account} />
+      ) : error ? (
+        <InlineMessage tone="warning">Could not load the account details here. Open it from your Identity Vault instead.</InlineMessage>
       ) : (
-        <div className="mt-3 flex items-center gap-2 text-sm text-green-700"><Loader2 className="h-4 w-4 animate-spin" /> Loading details…</div>
+        <p role="status" className="text-sm text-muted">Loading account details</p>
       )}
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-      <Link href={`/accounts/${accountId}`} className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-green-800 underline">
-        <KeyRound className="h-4 w-4" /> Open in your vault <ArrowRight className="h-4 w-4" />
+      <Link href={`/accounts/${accountId}`} className="inline-flex items-center gap-1 text-sm font-medium text-success underline">
+        <KeyRound className="h-4 w-4" aria-hidden="true" /> Open in Identity Vault <ArrowRight className="h-4 w-4" aria-hidden="true" />
       </Link>
-    </div>
+    </section>
   );
 }
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const ready = useRequireAuth();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const [busy, setBusy] = useState<"resume" | "cancel" | "retry" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [browserWaiting, setBrowserWaiting] = useState(false);
 
-  useEffect(() => {
-    if (!isAuthenticated()) router.push(`/login?next=/jobs/${id}`);
-  }, [id, router]);
-
-  // Keep polling until the job is finished. A paused job is still polled (more slowly):
-  // pressing "continue" hands it back to the live browser, so its state changes on its own.
+  // Poll until the job is finished. A paused job is still polled: pressing Continue hands it back
+  // to the agent, so its state changes on its own.
   const [finished, setFinished] = useState(false);
-  const { data: job, refresh } = useCachedData(`job:${id}`, () => getRegistrationJob(id), {
-    refreshMs: finished ? 0 : 3000,
-  });
+  const { data: job, error: loadError, refresh } = useCachedData(
+    ready ? `job:${id}` : null,
+    () => getRegistrationJob(id),
+    { refreshMs: finished ? 0 : 3000 },
+  );
   useEffect(() => {
-    setFinished(!!job && TERMINAL.has(job.state));
+    setFinished(!!job && TERMINAL_STATES.has(job.state));
   }, [job]);
 
-  async function run(action: () => Promise<void>, failMessage: string) {
-    setBusy(true);
+  async function run(kind: NonNullable<typeof busy>, action: () => Promise<void>, failMessage: string) {
+    setBusy(kind);
     setError(null);
     try {
       await action();
     } catch (err) {
       setError(err instanceof ApiError ? String(err.message) : failMessage);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
-  const handleResume = () =>
-    run(async () => {
+  if (!ready) return <PageSpinner />;
+  if (!job) {
+    if (loadError instanceof ApiError && loadError.status === 404) {
+      return (
+        <EmptyState
+          title="Task not found"
+          description="It may have been removed from Activity."
+          action={<Link href="/dashboard" className={buttonClass("primary")}>Back to Activity</Link>}
+        />
+      );
+    }
+    if (loadError) return <ErrorState title="Could not load this task" message="Check your connection and try again." onRetry={() => void refresh()} />;
+    return <PageSpinner label="Loading task" />;
+  }
+
+  const meta = statusMeta(job.state);
+  const paused = RESUMABLE_STATES.has(job.state);
+  const errorText = friendlyJobError(job);
+
+  const retryCaution =
+    canRetry(job.state) &&
+    (job.kind === "form"
+      ? mayHaveSubmitted(job.steps)
+        ? "The form may already have been submitted before this task stopped. Submitting it again could create a duplicate response."
+        : null
+      : job.kind === "registration" && job.identity_id
+        ? "The agent had already started signing up before this task stopped, so the site may have received a registration. A new attempt creates a new identity and a new submission."
+        : null);
+
+  async function handleResume() {
+    await run("resume", async () => {
       await resumeRegistrationJob(id);
       await refresh();
-    }, "Could not resume the job.");
+    }, "Could not continue the task.");
+  }
 
-  const handleCancel = () =>
-    run(async () => {
+  async function handleCancel() {
+    const ok = await confirm({
+      title: "Cancel this task?",
+      description: "The agent stops where it is. Anything it already sent to the website is not undone.",
+      confirmLabel: "Cancel task",
+      cancelLabel: "Keep running",
+      destructive: true,
+    });
+    if (!ok) return;
+    await run("cancel", async () => {
       await cancelRegistrationJob(id);
+      invalidate("jobs");
       await refresh();
-    }, "Could not cancel the job.");
+    }, "Could not cancel the task.");
+  }
 
-  const handleRetry = () =>
-    run(async () => {
+  async function handleRetry() {
+    const ok = await confirm({
+      title: "Start a new attempt?",
+      description: retryCaution ?? "This creates a new task for the same site. This one stays in Activity as a record.",
+      confirmLabel: "Start new attempt",
+    });
+    if (!ok) return;
+    await run("retry", async () => {
       const fresh = await retryRegistrationJob(id);
       invalidate("jobs");
       router.push(`/jobs/${fresh.id}`);
-    }, "Could not retry the job.");
-
-  const handleDelete = () => {
-    if (!confirm("Remove this job from your list? Any account it created stays in your vault.")) return;
-    return run(async () => {
-      await deleteRegistrationJob(id);
-      invalidate("jobs");
-      router.push("/dashboard");
-    }, "Could not delete the job.");
-  };
-
-  if (!job) {
-    return <div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    }, "Could not start a new attempt.");
   }
 
-  const active = !TERMINAL.has(job.state) && !RESUMABLE.has(job.state);
+  async function handleDelete() {
+    const ok = await confirm({
+      title: "Remove this task from Activity?",
+      description: "This only hides the task. Any account it created stays in your Identity Vault, and nothing is deleted from the website.",
+      confirmLabel: "Remove from list",
+      destructive: true,
+    });
+    if (!ok) return;
+    await run("delete", async () => {
+      await deleteRegistrationJob(id);
+      invalidate("jobs");
+      toast.success("Task removed from Activity.");
+      router.push("/dashboard");
+    }, "Could not remove the task.");
+  }
+
+  const targetUrl = job.target_url && isSafeHttpUrl(job.target_url) ? job.target_url : "";
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
+    <div className="mx-auto max-w-3xl space-y-5">
+      <Link href="/dashboard" className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink">
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" /> Activity
+      </Link>
+
+      {/* Summary */}
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold">{job.domain}</h1>
-            <p className="text-xs text-black/40">Started {job.started_at ? new Date(job.started_at).toLocaleString() : "—"}</p>
+            <h1 className="break-all font-mono text-lg font-semibold tracking-tight">{job.domain}</h1>
+            {targetUrl && (
+              <a
+                href={targetUrl} target="_blank" rel="noopener noreferrer"
+                className="mt-0.5 inline-flex max-w-full items-center gap-1 text-xs text-muted hover:text-ink"
+              >
+                <span className="truncate font-mono">{targetUrl}</span>
+                <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="sr-only">(opens in a new tab)</span>
+              </a>
+            )}
           </div>
           <StateBadge state={job.state} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge>{taskTypeLabel(job)}</Badge>
+          {job.source === "mcp" && <Badge>Started by an AI client</Badge>}
           <AiBadge provider={job.provider} model={job.model} />
-          {job.kind === "account_setup" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Connect account</span>}
-          {job.kind === "form" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Form</span>}
-          {job.kind === "registration" && job.account_mode === "permanent" && (
-            <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">Permanent account</span>
-          )}
-          {job.source === "mcp" && <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs text-black/60">From an AI client</span>}
         </div>
-      </div>
+        <p className="text-sm text-muted">{meta.description}</p>
+        <p className="text-xs text-muted">
+          {job.started_at ? `Started ${formatDateTime(job.started_at)}` : `Created ${formatDateTime(job.created_at)}`}
+          {job.completed_at && ` · Finished ${formatDateTime(job.completed_at)}`}
+        </p>
+        <span className="sr-only" role="status" aria-live="polite">Task status: {meta.label}</span>
+      </header>
 
+      {/* Needs the user */}
       {job.pending_question && job.state === "waiting_for_user" && (
-        <QuestionCard key={job.pending_question.id} jobId={id} question={job.pending_question} onDone={() => refresh()} />
+        <QuestionCard key={job.pending_question.id} jobId={id} question={job.pending_question} onDone={() => void refresh()} />
       )}
 
-      {job.state === "completed" && job.kind === "form" && job.result?.submitted && (
-        <div className="space-y-3 rounded-md border border-green-200 bg-green-50 p-4">
-          <div className="flex items-center gap-2 font-medium text-green-800">
-            <CheckCircle2 className="h-4 w-4" /> Form submitted. This is what was sent:
+      {paused && (
+        <section className="rounded-lg border border-warning-line bg-warning-soft p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-warning">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" /> {meta.label}
+          </h2>
+          <p className="mt-1 text-sm text-ink">{job.error_message || meta.description}</p>
+          <p className="mt-2 text-sm text-muted">
+            {browserWaiting
+              ? "The agent's browser is waiting for you. Open the browser preview below, complete the step on the page, then press Continue."
+              : "Open the browser preview below to see where the agent stopped. If the browser is no longer waiting, Continue starts a new browser session and revisits the page, so progress on the site may not carry over."}
+          </p>
+          <p className="mt-2 text-xs text-muted">The agent never solves or bypasses CAPTCHAs and other security checks. They are always left to you.</p>
+          <div className="mt-3">
+            <Button variant="primary" onClick={handleResume} loading={busy === "resume"}>
+              Continue <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
-          <dl className="divide-y divide-green-200/70 rounded-md bg-white text-sm">
+        </section>
+      )}
+
+      {job.manual_available && job.kind === "registration" && <ManualKit jobId={id} onSaved={() => void refresh()} />}
+
+      {/* Browser */}
+      {!TERMINAL_STATES.has(job.state) && (
+        <LiveBrowser jobId={id} needsHuman={paused} finished={false} onInteractiveChange={setBrowserWaiting} />
+      )}
+
+      {/* Results */}
+      {job.state === "completed" && job.kind === "form" && job.result?.submitted && (
+        <section className="space-y-3 rounded-lg border border-success-line bg-success-soft p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-success">
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Form submitted. This is what was sent:
+          </h2>
+          <dl className="divide-y divide-line rounded-md border border-line bg-surface text-sm">
             {job.result.submitted.map((a, i) => (
               <div key={i} className="grid gap-0.5 px-3 py-2 sm:grid-cols-[40%_1fr] sm:gap-3">
-                <dt className="text-black/50">{a.question}</dt>
+                <dt className="text-muted">{a.question}</dt>
                 <dd className="break-words">{a.answer}</dd>
               </div>
             ))}
           </dl>
-          {job.result.note && <p className="text-xs text-green-800">{job.result.note}</p>}
-        </div>
+          {job.result.note && <p className="text-xs text-muted">{job.result.note}</p>}
+        </section>
       )}
 
       {job.state === "completed" && job.kind === "registration" && job.result?.summary && (
-        <div className="space-y-2 rounded-md border border-black/10 bg-white p-4 text-sm">
-          <p className="font-medium">Extracted information</p>
-          <p className="text-black/70">{job.result.summary}</p>
+        <Panel title="Information the agent found">
+          <p className="text-sm">{job.result.summary}</p>
           {job.result.data && Object.keys(job.result.data).length > 0 && (
-            <pre className="overflow-x-auto rounded-md bg-black/[0.04] p-3 text-xs">{JSON.stringify(job.result.data, null, 2)}</pre>
+            <pre className="mt-3 overflow-x-auto rounded-md bg-subtle p-3 font-mono text-xs">{JSON.stringify(job.result.data, null, 2)}</pre>
           )}
-        </div>
+        </Panel>
       )}
 
       {job.state === "completed" && job.kind === "account_setup" && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-          <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0" /> {job.result?.note || "Account connected."}</span>
-          <Link href="/settings" className="shrink-0 font-medium underline">Back to settings</Link>
-        </div>
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-success-line bg-success-soft p-4 text-sm">
+          <span className="flex items-center gap-2 text-success">
+            <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> {job.result?.note || "Account connected."}
+          </span>
+          <Link href="/settings?tab=accounts" className="font-medium text-success underline">Back to Settings</Link>
+        </section>
       )}
 
-      {job.state === "completed" && job.account_id && (
-        <CredentialsCard accountId={job.account_id} domain={job.domain} />
-      )}
-      {job.state === "completed" && !job.account_id && job.kind !== "account_setup" && job.kind !== "form" && (
-        <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-700">
-          <CheckCircle2 className="h-4 w-4" /> Account created —
-          <Link href="/accounts" className="font-medium underline">view it in your vault</Link>
-        </div>
+      {job.state === "completed" && job.account_id && <CredentialsCard accountId={job.account_id} domain={job.domain} />}
+      {job.state === "completed" && !job.account_id && job.kind === "registration" && (
+        <InlineMessage tone="success">
+          Completed. Check your <Link href="/accounts" className="font-medium underline">Identity Vault</Link> for the account.
+        </InlineMessage>
       )}
 
-      {RESUMABLE.has(job.state) && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-          <div className="flex items-center gap-2 font-medium text-amber-800">
-            <AlertTriangle className="h-4 w-4" /> Human action required
+      {/* Failure */}
+      {(job.state === "failed" || job.state === "expired") && errorText && (
+        <section role="alert" className="flex items-start gap-2 rounded-lg border border-danger-line bg-danger-soft p-4 text-sm">
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="font-medium text-danger">{job.state === "expired" ? "This task ran out of time" : "This task did not finish"}</p>
+            <p className="mt-0.5 break-words text-ink">{errorText}</p>
+            {job.error_code && (
+              <details className="mt-2 text-xs text-muted">
+                <summary className="cursor-pointer select-none hover:text-ink">Technical details</summary>
+                <p className="mt-1 break-all font-mono">{job.error_code}</p>
+              </details>
+            )}
           </div>
-          <p className="mt-1 text-sm text-amber-700">{job.error_message || "A manual step is needed on the target site."}</p>
-          <p className="mt-2 text-xs text-amber-700/80">
-            The agent&apos;s browser is waiting for you. Open the live browser below, complete the step
-            (for example tick the CAPTCHA or pick the images), then press &ldquo;I&apos;m done — continue&rdquo;.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              onClick={handleResume} disabled={busy}
-              className="flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
-            >
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              I&apos;m done — continue <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
+        </section>
+      )}
+      {retryCaution && <InlineMessage tone="warning">{retryCaution}</InlineMessage>}
+
+      {/* Controls */}
+      {(canRetry(job.state) || canCancel(job.state) || canDismiss(job.state)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {canRetry(job.state) && (
+            <Button variant="primary" onClick={handleRetry} loading={busy === "retry"}>
+              {busy !== "retry" && <RotateCcw className="h-4 w-4" aria-hidden="true" />} Try again
+            </Button>
+          )}
+          {canCancel(job.state) && (
+            <Button variant="danger-ghost" onClick={handleCancel} loading={busy === "cancel"}>Cancel task</Button>
+          )}
+          {canDismiss(job.state) && (
+            <Button variant="danger-ghost" onClick={handleDelete} loading={busy === "delete"}>
+              {busy !== "delete" && <Trash2 className="h-4 w-4" aria-hidden="true" />} Remove from Activity
+            </Button>
+          )}
         </div>
       )}
+      {error && <InlineMessage tone="danger">{error}</InlineMessage>}
 
-      {job.manual_available && job.kind === "registration" && (
-        <ManualKit jobId={id} onSaved={() => refresh()} />
-      )}
-
-      {!TERMINAL.has(job.state) && (
-        <LiveBrowser jobId={id} needsHuman={RESUMABLE.has(job.state)} finished={false} />
-      )}
-
-      {job.state === "failed" && job.error_message && (
-        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <XCircle className="mt-0.5 h-4 w-4 shrink-0" /> <span className="min-w-0 break-words">{job.error_message}</span>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        {RETRYABLE.has(job.state) && (
-          <button
-            onClick={handleRetry} disabled={busy}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Try again
-          </button>
-        )}
-        {active && (
-          <button onClick={handleCancel} disabled={busy} className="text-sm text-black/50 underline hover:text-red-600">
-            Cancel this job
-          </button>
-        )}
-        {!active && (
-          <button
-            onClick={handleDelete} disabled={busy}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-black/50 hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
-          >
-            <Trash2 className="h-4 w-4" /> Delete
-          </button>
-        )}
-      </div>
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <div>
-        <h2 className="mb-2 text-sm font-medium text-black/60">Progress</h2>
-        <ol className="space-y-2.5">
-          {job.steps.map((step) => (
-            <li key={step.step_index} className="flex items-start gap-2 text-sm">
-              {step.success ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-              ) : (
-                <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
-              )}
-              <span className="min-w-0 break-words">{stepText(step)}</span>
-            </li>
-          ))}
-          {job.steps.length === 0 && <li className="text-sm text-black/40">Waiting for the agent to start…</li>}
-        </ol>
-      </div>
+      {/* Timeline */}
+      <Panel title="Timeline" description="What the agent did, in order.">
+        <Timeline steps={job.steps} state={job.state} />
+      </Panel>
     </div>
   );
 }

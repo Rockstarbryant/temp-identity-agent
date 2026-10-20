@@ -2,11 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  color-scheme: light;
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-sm text-ink antialiased;
+  }
+
+  /* One consistent, always-visible keyboard focus indicator. */
+  :focus-visible {
+    outline: 2px solid theme("colors.accent.DEFAULT");
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: theme("colors.accent.soft");
+  }
+
+  /* Native <dialog> elements are used for modals and the notification drawer. */
+  dialog {
+    color: inherit;
+  }
 }
 
-body {
-  background-color: #fafaf9;
-  color: #0f1115;
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

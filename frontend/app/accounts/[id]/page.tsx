@@ -1,129 +1,137 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  getAccount, revealCredentials, deleteAccount,
-  TemporaryAccountSummary, RevealedCredentials, isAuthenticated,
-} from "@/lib/api";
+import { ArrowLeft, Mail, Trash2 } from "lucide-react";
+import { ApiError, deleteAccount, getAccount } from "@/lib/api";
 import { invalidate } from "@/lib/cache";
+import { useCachedData } from "@/lib/useCachedData";
+import { useRequireAuth } from "@/lib/useRequireAuth";
+import { describeExpiry, formatDateTime } from "@/lib/format";
 import MailboxPanel from "@/components/MailboxPanel";
-import { Loader2, Copy, Check, Eye, Trash2 } from "lucide-react";
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(value);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
-      className="rounded-md p-1.5 text-black/40 hover:bg-black/5 hover:text-accent"
-      aria-label="Copy"
-    >
-      {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-    </button>
-  );
-}
+import CredentialsPanel from "@/components/vault/CredentialsPanel";
+import { AccountStatusBadge, AccountTypeBadges } from "@/components/vault/AccountBadges";
+import Button, { buttonClass } from "@/components/ui/Button";
+import { Panel } from "@/components/ui/Card";
+import { EmptyState, ErrorState, InlineMessage, PageSpinner } from "@/components/ui/States";
+import { useConfirm, useToast } from "@/components/ui/Feedback";
 
 export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [account, setAccount] = useState<TemporaryAccountSummary | null>(null);
-  const [revealed, setRevealed] = useState<RevealedCredentials | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const ready = useRequireAuth();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push(`/login?next=/accounts/${id}`);
-      return;
-    }
-    getAccount(id).then(setAccount).catch(() => setAccount(null));
-  }, [id, router]);
+  const { data: account, error: loadError, refresh } = useCachedData(ready ? `account:${id}` : null, () => getAccount(id));
 
-  async function handleReveal() {
-    setLoading(true);
-    setError(null);
-    try {
-      setRevealed(await revealCredentials(id));
-    } catch {
-      setError("Could not reveal credentials for this account.");
-    } finally {
-      setLoading(false);
+  if (!ready) return <PageSpinner />;
+  if (!account) {
+    if (loadError instanceof ApiError && loadError.status === 404) {
+      return (
+        <EmptyState
+          title="Account not found"
+          description="It may have been removed from your vault."
+          action={<Link href="/accounts" className={buttonClass("primary")}>Back to Identity Vault</Link>}
+        />
+      );
     }
+    if (loadError) return <ErrorState title="Could not load this account" message="Check your connection and try again." onRetry={() => void refresh()} />;
+    return <PageSpinner label="Loading account" />;
   }
 
+  const expiry = describeExpiry(account);
+  const gone = account.status === "deleted";
+
   async function handleDelete() {
-    if (!confirm("Delete this account? This permanently removes the stored credentials.")) return;
-    setLoading(true);
+    const ok = await confirm({
+      title: `Delete ${account?.domain} from your vault?`,
+      description: (
+        <>
+          <p>This erases the stored password and the mailbox and its messages from this app. It cannot be undone.</p>
+          <p className="mt-2 font-medium text-ink">
+            It does not delete your account on {account?.domain}. If you want that account gone, close it on the website yourself.
+          </p>
+        </>
+      ),
+      confirmLabel: "Delete from vault",
+      destructive: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
+    setError(null);
     try {
       await deleteAccount(id);
       invalidate("accounts");
+      invalidate(`account:${id}`);
+      invalidate("jobs");
+      toast.success("Deleted from your vault.");
       router.push("/accounts");
-    } catch {
-      setError("Could not delete this account.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete this account. Nothing was removed.");
     } finally {
-      setLoading(false);
+      setDeleting(false);
     }
   }
 
-  if (!account) {
-    return <div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
-
   return (
-    <div className="mx-auto max-w-xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">{account.domain}</h1>
-        {account.manual && <p className="mt-0.5 text-xs text-accent">Signed up manually</p>}
-        <p className="text-xs text-black/40">{account.permanent ? "Permanent account (no expiry)" : `Expires ${new Date(account.expires_at).toLocaleString()}`}</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-5">
+      <Link href="/accounts" className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink">
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" /> Identity Vault
+      </Link>
 
-      <dl className="space-y-3 rounded-md border border-black/10 p-4 text-sm">
-        <div className="flex items-center justify-between">
-          <dt className="text-black/50">Email</dt>
-          <dd className="flex items-center gap-1 font-mono">{account.email} <CopyButton value={account.email} /></dd>
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h1 className="break-all font-mono text-lg font-semibold tracking-tight">{account.domain}</h1>
+          <AccountStatusBadge status={account.status} />
         </div>
-        {account.username && (
-          <div className="flex items-center justify-between">
-            <dt className="text-black/50">Username</dt>
-            <dd className="flex items-center gap-1 font-mono">{account.username} <CopyButton value={account.username} /></dd>
-          </div>
-        )}
-        <div className="flex items-center justify-between">
-          <dt className="text-black/50">Password</dt>
-          {revealed ? (
-            <dd className="flex items-center gap-1 font-mono">{revealed.password} <CopyButton value={revealed.password} /></dd>
-          ) : (
-            <dd>
-              <button
-                onClick={handleReveal} disabled={loading || account.status !== "active"}
-                className="flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50"
-              >
-                {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
-                Reveal
-              </button>
-            </dd>
+        <div className="flex flex-wrap items-center gap-1.5"><AccountTypeBadges account={account} /></div>
+        <p className="text-sm text-muted">{expiry.label}</p>
+        <p className="text-xs text-muted">Saved {formatDateTime(account.created_at)}</p>
+      </header>
+
+      {gone ? (
+        <InlineMessage tone="info">This account was deleted from your vault. Its credentials and mailbox are gone.</InlineMessage>
+      ) : (
+        <>
+          {account.status === "expired" && (
+            <InlineMessage tone="warning">
+              This temporary identity has expired. The password may no longer be needed, and new email can no longer arrive.
+            </InlineMessage>
           )}
-        </div>
-      </dl>
 
-      {account.status === "active" && <MailboxPanel accountId={id} />}
+          <Panel title="Credentials" description="Reveal the password only when you need it.">
+            <CredentialsPanel account={account} />
+          </Panel>
 
-      {account.status !== "active" && (
-        <p className="text-sm text-black/50">This account is {account.status} and can no longer be used.</p>
+          <Panel
+            title="Mailbox"
+            description="Verification emails for this account."
+            actions={
+              <Link href={`/mailboxes?account=${account.id}`} className={buttonClass("ghost", "sm")}>
+                <Mail className="h-4 w-4" aria-hidden="true" /> Open in Mailboxes
+              </Link>
+            }
+          >
+            <MailboxPanel accountId={account.id} />
+          </Panel>
+        </>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <button
-        onClick={handleDelete} disabled={loading}
-        className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
-      >
-        <Trash2 className="h-4 w-4" /> Delete this account
-      </button>
+      {!gone && (
+        <Panel title="Delete from vault">
+          <p className="text-sm text-muted">
+            Removes the stored credentials and mailbox from this app. Your account on <span className="font-mono">{account.domain}</span> is not deleted.
+          </p>
+          <Button className="mt-3" variant="danger" onClick={handleDelete} loading={deleting}>
+            {!deleting && <Trash2 className="h-4 w-4" aria-hidden="true" />} Delete from vault
+          </Button>
+          {error && <div className="mt-3"><InlineMessage tone="danger">{error}</InlineMessage></div>}
+        </Panel>
+      )}
     </div>
   );
 }

@@ -1,20 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
 import {
-  getMe, logout, isAuthenticated, getProfile, getEmailConnection, listApiKeys, listConnectedAccounts,
   AccountMode, ApiKeySummary, ConnectedAccount, EmailConnection, ProfileData, ProfileEntry,
+  getEmailConnection, getMe, getProfile, listApiKeys, listConnectedAccounts, logout,
 } from "@/lib/api";
+import { stopNotifications } from "@/lib/notifications";
 import { useCachedData } from "@/lib/useCachedData";
-import { Loader2 } from "lucide-react";
+import { useRequireAuth } from "@/lib/useRequireAuth";
+import { formatDate } from "@/lib/format";
 import AccountTypeCard from "@/components/settings/AccountTypeCard";
 import DetailsCard from "@/components/settings/DetailsCard";
 import EmailCard from "@/components/settings/EmailCard";
 import ConnectedAccountsCard from "@/components/settings/ConnectedAccountsCard";
 import McpCard from "@/components/settings/McpCard";
 import Section from "@/components/settings/Section";
+import Button from "@/components/ui/Button";
+import PageHeader from "@/components/ui/PageHeader";
+import { ErrorState, PageSpinner } from "@/components/ui/States";
+import { cn } from "@/components/ui/cn";
 
 const GMAIL_NOTICES: Record<string, string> = {
   connected: "Gmail connected.",
@@ -22,84 +27,153 @@ const GMAIL_NOTICES: Record<string, string> = {
   error: "Could not connect Gmail. Try again, or use an app password.",
 };
 
+const TABS = [
+  { id: "preferences", label: "Account and identity" },
+  { id: "details", label: "Saved details" },
+  { id: "email", label: "Email" },
+  { id: "accounts", label: "Sign-in accounts" },
+  { id: "developer", label: "Developer and MCP" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+
 function SettingsInner() {
+  const ready = useRequireAuth();
   const router = useRouter();
   const params = useSearchParams();
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  useEffect(() => {
-    if (!isAuthenticated()) router.push("/login?next=/settings");
-  }, [router]);
+  const requested = params.get("tab");
+  const tab: TabId = TABS.some((t) => t.id === requested) ? (requested as TabId) : "preferences";
 
-  const { data: user } = useCachedData("me", getMe);
-  const { data: profile, mutate: mutateProfile, refresh: refreshProfile } = useCachedData<ProfileData>("profile", getProfile);
-  const { data: email, mutate: mutateEmail, refresh: refreshEmail } = useCachedData<EmailConnection>("email-connection", getEmailConnection);
-  const { data: accounts, mutate: mutateAccounts } = useCachedData<ConnectedAccount[]>("connected-accounts", listConnectedAccounts);
-  const { data: keys, mutate: mutateKeys } = useCachedData<ApiKeySummary[]>("api-keys", listApiKeys);
+  const { data: user, error: userError, refresh: refreshUser } = useCachedData(ready ? "me" : null, getMe);
+  const { data: profile, mutate: mutateProfile, refresh: refreshProfile, error: profileError } =
+    useCachedData<ProfileData>(ready ? "profile" : null, getProfile);
+  const { data: email, mutate: mutateEmail, refresh: refreshEmail, error: emailError } =
+    useCachedData<EmailConnection>(ready ? "email-connection" : null, getEmailConnection);
+  const { data: accounts, mutate: mutateAccounts, error: accountsError } =
+    useCachedData<ConnectedAccount[]>(ready ? "connected-accounts" : null, listConnectedAccounts);
+  const { data: keys, mutate: mutateKeys, error: keysError } =
+    useCachedData<ApiKeySummary[]>(ready ? "api-keys" : null, listApiKeys);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Coming back from Google's consent screen.
+  // Coming back from Google's consent screen: show the result on the Email tab.
   useEffect(() => {
     const g = params.get("gmail");
     if (!g) return;
     setNotice(GMAIL_NOTICES[g] ?? null);
-    refreshEmail();
-    router.replace("/settings");
+    void refreshEmail();
+    router.replace("/settings?tab=email", { scroll: false });
   }, [params, refreshEmail, router]);
 
-  async function handleLogout() {
-    await logout();
-    router.push("/login");
+  function select(id: TabId) {
+    router.replace(`/settings?tab=${id}`, { scroll: false });
   }
 
-  if (!user || !profile || !email) {
-    return <div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next = -1;
+    if (e.key === "ArrowRight") next = (index + 1) % TABS.length;
+    if (e.key === "ArrowLeft") next = (index - 1 + TABS.length) % TABS.length;
+    if (e.key === "Home") next = 0;
+    if (e.key === "End") next = TABS.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    select(TABS[next].id);
+    tabRefs.current[TABS[next].id]?.focus();
   }
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } finally {
+      stopNotifications();
+      router.push("/login");
+    }
+  }
+
+  if (!ready) return <PageSpinner />;
+
+  const loadFail = (err: unknown, retry?: () => void) =>
+    err ? <ErrorState title="Could not load this section" message="Check your connection and try again." onRetry={retry} /> : <PageSpinner />;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <h1 className="text-xl font-semibold">Settings</h1>
+    <div className="mx-auto max-w-3xl">
+      <PageHeader title="Settings" description="Your identity preferences, saved details, email and integrations." />
 
-      <AccountTypeCard
-        mode={profile.account_mode}
-        emailConnected={email.connected}
-        onChange={(m: AccountMode) => mutateProfile((p) => (p ? { ...p, account_mode: m } : p))}
-      />
+      <div role="tablist" aria-label="Settings sections" className="-mx-4 mb-6 flex gap-1 overflow-x-auto border-b border-line px-4 md:mx-0 md:px-0">
+        {TABS.map((t, i) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              ref={(el) => { tabRefs.current[t.id] = el; }}
+              type="button"
+              role="tab"
+              id={`tab-${t.id}`}
+              aria-selected={active}
+              aria-controls={`panel-${t.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => select(t.id)}
+              onKeyDown={(e) => onKeyDown(e, i)}
+              className={cn(
+                "-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors",
+                active ? "border-accent-strong font-medium text-accent-strong" : "border-transparent text-muted hover:text-ink",
+              )}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-      <EmailCard connection={email} notice={notice} onChange={(c) => { mutateEmail(() => c); refreshProfile(); }} />
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="space-y-6">
+        {tab === "preferences" && (
+          <>
+            {profile ? (
+              <AccountTypeCard
+                mode={profile.account_mode}
+                emailConnected={!!email?.connected}
+                onChange={(m: AccountMode) => mutateProfile((p) => (p ? { ...p, account_mode: m } : p))}
+              />
+            ) : loadFail(profileError, () => void refreshProfile())}
 
-      <DetailsCard
-        profile={profile}
-        onChange={(entries: ProfileEntry[]) => mutateProfile((p) => (p ? { ...p, entries } : p))}
-      />
+            {user ? (
+              <Section title="Account" hint="Temporary identities expire automatically. You can delete any account early from the Identity Vault.">
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4"><dt className="text-muted">Username</dt><dd className="font-mono">{user.username}</dd></div>
+                  {user.email && <div className="flex justify-between gap-4"><dt className="text-muted">Email</dt><dd className="break-all text-right font-mono">{user.email}</dd></div>}
+                  <div className="flex justify-between gap-4"><dt className="text-muted">Member since</dt><dd>{formatDate(user.date_joined)}</dd></div>
+                </dl>
+                <div className="mt-4 border-t border-line pt-4">
+                  <Button variant="danger-ghost" onClick={handleLogout}>Log out</Button>
+                </div>
+              </Section>
+            ) : loadFail(userError, () => void refreshUser())}
+          </>
+        )}
 
-      <ConnectedAccountsCard accounts={accounts ?? []} onChange={(a) => mutateAccounts(() => a)} />
+        {tab === "details" &&
+          (profile ? (
+            <DetailsCard profile={profile} onChange={(entries: ProfileEntry[]) => mutateProfile((p) => (p ? { ...p, entries } : p))} />
+          ) : loadFail(profileError, () => void refreshProfile()))}
 
-      <McpCard keys={keys ?? []} onChange={(k) => mutateKeys(() => k)} />
+        {tab === "email" &&
+          (email ? (
+            <EmailCard connection={email} notice={notice} onChange={(c) => { mutateEmail(() => c); void refreshProfile(); }} />
+          ) : loadFail(emailError, () => void refreshEmail()))}
 
-      <Section title="Account">
-        <dl className="space-y-3 text-sm">
-          <div className="flex justify-between"><dt className="text-black/50">Username</dt><dd>{user.username}</dd></div>
-          {user.email && <div className="flex justify-between"><dt className="text-black/50">Email</dt><dd className="break-all pl-4 text-right">{user.email}</dd></div>}
-          <div className="flex justify-between">
-            <dt className="text-black/50">Member since</dt>
-            <dd>{new Date(user.date_joined).toLocaleDateString()}</dd>
-          </div>
-        </dl>
-        <p className="mt-4 text-xs text-black/40">
-          Temporary accounts expire automatically based on your organization&apos;s retention policy. You can delete any
-          account early from the vault.
-        </p>
-        <button onClick={handleLogout} className="mt-3 text-sm text-red-600 hover:text-red-700">
-          Log out
-        </button>
-      </Section>
+        {tab === "accounts" &&
+          (accounts ? <ConnectedAccountsCard accounts={accounts} onChange={(a) => mutateAccounts(() => a)} /> : loadFail(accountsError))}
+
+        {tab === "developer" &&
+          (keys ? <McpCard keys={keys} onChange={(k) => mutateKeys(() => k)} /> : loadFail(keysError))}
+      </div>
     </div>
   );
 }
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+    <Suspense fallback={<PageSpinner />}>
       <SettingsInner />
     </Suspense>
   );

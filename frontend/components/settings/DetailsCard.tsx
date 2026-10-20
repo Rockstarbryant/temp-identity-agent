@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, Plus, Trash2 } from "lucide-react";
 import { ApiError, ProfileData, ProfileEntry, deleteProfileEntry, saveProfileEntry } from "@/lib/api";
+import Button from "@/components/ui/Button";
+import Field from "@/components/ui/Field";
+import { InlineMessage } from "@/components/ui/States";
+import { useConfirm } from "@/components/ui/Feedback";
 import Section from "./Section";
 
 interface Props {
@@ -15,6 +19,7 @@ function normalizeKey(raw: string) {
 }
 
 export default function DetailsCard({ profile, onChange }: Props) {
+  const confirm = useConfirm();
   const byKey = new Map(profile.entries.map((e) => [e.key, e]));
   const standardKeys = new Set(profile.standard_fields.map((f) => f.key));
   const extra = profile.entries.filter((e) => !standardKeys.has(e.key));
@@ -44,7 +49,7 @@ export default function DetailsCard({ profile, onChange }: Props) {
       const others = profile.entries.filter((e) => e.key !== key);
       onChange(saved ? [...others, saved].sort((a, b) => a.label.localeCompare(b.label)) : others);
       setSavedKey(key);
-      setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
+      setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1800);
     } catch (err) {
       setError(err instanceof ApiError ? String(err.message) : "Could not save that.");
     } finally {
@@ -52,7 +57,14 @@ export default function DetailsCard({ profile, onChange }: Props) {
     }
   }
 
-  async function remove(key: string) {
+  async function remove(key: string, label: string) {
+    const ok = await confirm({
+      title: `Delete saved detail "${label}"?`,
+      description: "The agent will ask you for it again the next time a form needs it.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusyKey(key);
     setError(null);
     try {
@@ -60,7 +72,7 @@ export default function DetailsCard({ profile, onChange }: Props) {
       onChange(profile.entries.filter((e) => e.key !== key));
       setDrafts((d) => ({ ...d, [key]: "" }));
     } catch {
-      setError("Could not remove that.");
+      setError("Could not delete that. It is still saved.");
     } finally {
       setBusyKey(null);
     }
@@ -77,97 +89,88 @@ export default function DetailsCard({ profile, onChange }: Props) {
 
   return (
     <Section
-      title="Your details"
-      hint="The agent uses these to fill forms for you, and asks only when something is missing. Stored encrypted. It never gets a field you haven't saved, and passwords can't be saved here."
+      title="Saved personal details"
+      hint="The agent may reuse these to fill in forms for you, and asks only when something is missing. They are stored encrypted. Passwords and similar secrets cannot be saved here."
     >
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         {profile.standard_fields.map((f) => {
           const saved = byKey.get(f.key)?.value ?? "";
           const draft = drafts[f.key] ?? "";
           const dirty = draft.trim() !== saved;
           return (
-            <label key={f.key} className="block text-xs">
-              <span className="text-black/60">{f.label}</span>
-              <div className="mt-1 flex gap-1.5">
-                <input
-                  type={f.type === "date" ? "date" : f.type === "tel" ? "tel" : "text"}
-                  value={draft}
-                  maxLength={500}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && dirty) save(f.key, draft.trim(), f.label);
-                  }}
-                  className="min-w-0 flex-1 rounded-md border border-black/15 px-2.5 py-1.5 text-sm"
-                />
+            <div key={f.key}>
+              <Field
+                label={f.label}
+                type={f.type === "date" ? "date" : f.type === "tel" ? "tel" : "text"}
+                value={draft}
+                maxLength={500}
+                onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && dirty) {
+                    e.preventDefault();
+                    void save(f.key, draft.trim(), f.label);
+                  }
+                }}
+              />
+              <div className="mt-1.5 flex min-h-8 items-center gap-2">
                 {busyKey === f.key ? (
-                  <Loader2 className="my-auto h-4 w-4 animate-spin text-black/40" />
+                  <Loader2 className="h-4 w-4 animate-spin text-muted" aria-label="Saving" />
                 ) : savedKey === f.key ? (
-                  <Check className="my-auto h-4 w-4 text-green-600" />
-                ) : dirty ? (
-                  <button
-                    type="button"
-                    onClick={() => save(f.key, draft.trim(), f.label)}
-                    className="rounded-md bg-accent px-2.5 text-xs font-medium text-white hover:bg-accent/90"
-                  >
-                    Save
-                  </button>
-                ) : null}
+                  <span role="status" className="inline-flex items-center gap-1 text-xs text-success"><Check className="h-4 w-4" aria-hidden="true" /> Saved</span>
+                ) : (
+                  <>
+                    {dirty && (
+                      <Button size="sm" variant="primary" onClick={() => void save(f.key, draft.trim(), f.label)}>
+                        {draft.trim() ? "Save" : "Clear"}
+                      </Button>
+                    )}
+                    {!dirty && saved && (
+                      <Button size="sm" variant="danger-ghost" onClick={() => void remove(f.key, f.label)}>
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete
+                      </Button>
+                    )}
+                  </>
+                )}
               </div>
-            </label>
+            </div>
           );
         })}
       </div>
 
-      <div className="mt-5 border-t border-black/10 pt-4">
-        <h3 className="text-xs font-semibold text-black/70">Other saved answers</h3>
-        <p className="mt-0.5 text-xs text-black/50">
-          Things the agent asked you and you chose to remember, or ones you add yourself (e.g. county, Address).
+      <div className="mt-6 border-t border-line pt-4">
+        <h3 className="text-sm font-semibold">Other saved answers</h3>
+        <p className="mt-0.5 text-xs text-muted">
+          Things the agent asked you and you chose to remember, or ones you add yourself (for example, Home county).
         </p>
         {extra.length > 0 && (
-          <ul className="mt-2 divide-y divide-black/5 text-sm">
+          <ul className="mt-3 divide-y divide-line rounded-md border border-line text-sm">
             {extra.map((e) => (
-              <li key={e.key} className="flex items-center gap-3 py-2">
+              <li key={e.key} className="flex items-center gap-3 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs text-black/50">{e.label}</p>
+                  <p className="truncate text-xs text-muted">
+                    {e.label} <span aria-hidden="true">·</span> {e.source === "answer" ? "Remembered from an answer" : "Added in Settings"}
+                  </p>
                   <p className="truncate">{e.value}</p>
                 </div>
-                <button
-                  onClick={() => remove(e.key)}
-                  disabled={busyKey === e.key}
-                  aria-label={`Remove ${e.label}`}
-                  className="rounded-md p-1.5 text-black/40 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                <Button
+                  size="sm" variant="danger-ghost" disabled={busyKey === e.key}
+                  onClick={() => void remove(e.key, e.label)} aria-label={`Delete ${e.label}`}
                 >
-                  {busyKey === e.key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                </button>
+                  {busyKey === e.key ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
+                </Button>
               </li>
             ))}
           </ul>
         )}
-        <form onSubmit={addCustom} className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <input
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            placeholder="Name (e.g. Home county)"
-            maxLength={100}
-            className="min-w-0 flex-1 rounded-md border border-black/15 px-2.5 py-1.5 text-sm"
-          />
-          <input
-            value={newValue}
-            onChange={(e) => setNewValue(e.target.value)}
-            placeholder="Value"
-            maxLength={500}
-            className="min-w-0 flex-1 rounded-md border border-black/15 px-2.5 py-1.5 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!normalizeKey(newLabel) || !newValue.trim()}
-            className="flex items-center justify-center gap-1 rounded-md border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-40"
-          >
-            <Plus className="h-4 w-4" /> Add
-          </button>
+        <form onSubmit={addCustom} className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <Field label="Name" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Home county" maxLength={100} />
+          <Field label="Value" value={newValue} onChange={(e) => setNewValue(e.target.value)} maxLength={500} />
+          <Button type="submit" disabled={!normalizeKey(newLabel) || !newValue.trim()}>
+            <Plus className="h-4 w-4" aria-hidden="true" /> Add
+          </Button>
         </form>
       </div>
-      {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+      {error && <div className="mt-3"><InlineMessage tone="danger">{error}</InlineMessage></div>}
     </Section>
   );
 }

@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { Hourglass, Infinity as InfinityIcon, Loader2 } from "lucide-react";
 import { AccountMode, ApiError, setAccountMode } from "@/lib/api";
+import { InlineMessage } from "@/components/ui/States";
+import { cn } from "@/components/ui/cn";
 import Section from "./Section";
 
 interface Props {
@@ -15,14 +17,14 @@ interface Props {
 const OPTIONS: { mode: AccountMode; title: string; text: string; icon: typeof Hourglass }[] = [
   {
     mode: "temporary",
-    title: "Temporary",
-    text: "A throwaway identity and a disposable inbox. Nothing links back to you. Expires automatically.",
+    title: "Temporary identity",
+    text: "A throwaway name and a disposable inbox. Nothing links back to you, and the account expires automatically.",
     icon: Hourglass,
   },
   {
     mode: "permanent",
-    title: "Permanent",
-    text: "Uses your own email and saved details, so the account is really yours. Needs your email connected below.",
+    title: "Permanent identity",
+    text: "Uses your own email and saved details, so the account really belongs to you. Needs your email connected.",
     icon: InfinityIcon,
   },
 ];
@@ -39,47 +41,51 @@ export default function AccountTypeCard({ mode, emailConnected, onChange }: Prop
       await setAccountMode(next);
       onChange(next);
     } catch (err) {
-      setError(err instanceof ApiError ? String(err.message) : "Could not save. Try again.");
+      setError(err instanceof ApiError ? String(err.message) : "Could not save. Nothing was changed.");
     } finally {
       setSaving(null);
     }
   }
 
   return (
-    <Section title="Account type" hint="What the agent creates when you give it a site to register on.">
-      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Account type">
+    <Section title="Identity type" hint="What the agent creates when you give it a site to register on. This is your default for every new task.">
+      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Identity type">
         {OPTIONS.map(({ mode: m, title, text, icon: Icon }) => {
           const selected = mode === m;
           return (
             <button
               key={m}
+              type="button"
               role="radio"
               aria-checked={selected}
-              onClick={() => choose(m)}
-              className={`rounded-md border p-3 text-left transition ${
-                selected ? "border-accent bg-accent/5 ring-1 ring-accent" : "border-black/15 hover:bg-black/[0.02]"
-              }`}
+              disabled={saving !== null}
+              onClick={() => void choose(m)}
+              className={cn(
+                "rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed",
+                selected ? "border-accent bg-accent-soft" : "border-line-strong hover:bg-subtle",
+              )}
             >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                {saving === m ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {saving === m ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Icon className="h-4 w-4" aria-hidden="true" />}
                 {title}
-                {selected && <span className="ml-auto text-xs text-accent">Selected</span>}
-              </div>
-              <p className="mt-1 text-xs text-black/60">{text}</p>
+                {selected && <span className="ml-auto text-xs font-normal text-accent-strong">Selected</span>}
+              </span>
+              <span className="mt-1 block text-xs text-muted">{text}</span>
             </button>
           );
         })}
       </div>
       {mode === "permanent" && !emailConnected && (
-        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Permanent accounts need your email so the agent can read verification codes and links. Connect it in the
-          &ldquo;Your email&rdquo; section below. Until then new jobs won&apos;t start.
-        </p>
+        <div className="mt-3">
+          <InlineMessage tone="warning">
+            Permanent identities need your email so the agent can read verification codes and links. Connect it in the Email tab. Until then new tasks will not start.
+          </InlineMessage>
+        </div>
       )}
-      {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
-      <p className="mt-3 text-xs text-black/40">
-        This applies to new jobs. Form filling (<Link href="/" className="underline">paste a Google Form on the home page</Link>)
-        doesn&apos;t create an account, so it ignores this.
+      {error && <div className="mt-3"><InlineMessage tone="danger">{error}</InlineMessage></div>}
+      <p className="mt-3 text-xs text-muted">
+        This applies to new registration tasks. Filling in a form (<Link href="/" className="text-accent-strong underline">paste a Google Form on Home</Link>)
+        does not create an account, so it ignores this setting.
       </p>
     </Section>
   );

@@ -1,47 +1,24 @@
-import { JobState } from "@/lib/api";
+import { AlertTriangle, Ban, CheckCircle2, CircleHelp, Clock, Hourglass, Loader2, Mail, XCircle } from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { StatusGroup, statusMeta } from "@/lib/jobStatus";
 
-const STYLES: Record<JobState, string> = {
-  queued: "bg-black/5 text-black/60",
-  starting: "bg-blue-50 text-blue-700",
-  opening_site: "bg-blue-50 text-blue-700",
-  analyzing: "bg-blue-50 text-blue-700",
-  identity_created: "bg-blue-50 text-blue-700",
-  filling_form: "bg-blue-50 text-blue-700",
-  submitting: "bg-blue-50 text-blue-700",
-  waiting_for_email: "bg-amber-50 text-amber-700",
-  verifying: "bg-amber-50 text-amber-700",
-  waiting_for_user: "bg-amber-50 text-amber-700",
-  completed: "bg-green-50 text-green-700",
-  captcha_required: "bg-red-50 text-red-700",
-  human_action_required: "bg-red-50 text-red-700",
-  failed: "bg-red-50 text-red-700",
-  cancelled: "bg-black/5 text-black/50",
-  expired: "bg-black/5 text-black/50",
+const ICONS: Record<StatusGroup, React.ReactNode> = {
+  running: <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />,
+  waiting_user: <AlertTriangle className="h-3 w-3" aria-hidden="true" />,
+  waiting_email: <Mail className="h-3 w-3" aria-hidden="true" />,
+  completed: <CheckCircle2 className="h-3 w-3" aria-hidden="true" />,
+  failed: <XCircle className="h-3 w-3" aria-hidden="true" />,
+  cancelled: <Ban className="h-3 w-3" aria-hidden="true" />,
+  expired: <Hourglass className="h-3 w-3" aria-hidden="true" />,
+  unknown: <CircleHelp className="h-3 w-3" aria-hidden="true" />,
 };
 
-const LABELS: Record<JobState, string> = {
-  queued: "Queued",
-  starting: "Starting",
-  opening_site: "Opening site",
-  analyzing: "Analyzing",
-  identity_created: "Identity created",
-  filling_form: "Filling form",
-  submitting: "Submitting",
-  waiting_for_email: "Waiting for email",
-  verifying: "Verifying",
-  waiting_for_user: "Needs your answer",
-  completed: "Completed",
-  captcha_required: "CAPTCHA — needs you",
-  human_action_required: "Action needed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  expired: "Expired",
-};
-
-export default function StateBadge({ state }: { state: JobState }) {
+/** Job status as text + icon + colour. Accepts any string so an unknown backend state is shown honestly. */
+export default function StateBadge({ state }: { state: string }) {
+  const meta = statusMeta(state);
   return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STYLES[state]}`}>
-      {LABELS[state]}
-    </span>
+    <Badge tone={meta.tone} icon={ICONS[meta.group] ?? <Clock className="h-3 w-3" aria-hidden="true" />}>
+      {meta.label}
+    </Badge>
   );
 }

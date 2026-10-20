@@ -5,16 +5,16 @@ const PROVIDER_NAMES: Record<string, string> = {
   groq: "Groq",
 };
 
-/** Shows which AI provider and model did (or is doing) the job. Always rendered. */
+/** Which AI provider and model handled (or is handling) the task, as reported by the backend. */
 export default function AiBadge({ provider, model }: { provider: string; model: string }) {
   const name = PROVIDER_NAMES[provider] || provider;
-  const text = provider ? `${name} · ${model || "model pending"}` : "AI model not selected yet";
+  const text = provider ? `${name} · ${model || "model pending"}` : "Model not selected yet";
   return (
     <span
       title={text}
-      className="inline-flex max-w-full items-center gap-1 rounded-md bg-black/[0.04] px-2 py-0.5 text-xs text-black/60"
+      className="inline-flex max-w-full items-center gap-1 rounded-md border border-line bg-subtle px-2 py-0.5 font-mono text-[11px] text-muted"
     >
-      <Cpu className="h-3 w-3 shrink-0" />
+      <Cpu className="h-3 w-3 shrink-0" aria-hidden="true" />
       <span className="truncate">{text}</span>
     </span>
   );

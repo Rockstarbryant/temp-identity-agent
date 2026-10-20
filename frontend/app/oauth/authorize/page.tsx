@@ -2,10 +2,22 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle2, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
 import { ApiError, OAuthParams, approveOAuth, getOAuthInfo, isAuthenticated } from "@/lib/api";
+import Button from "@/components/ui/Button";
+import { InlineMessage, PageSpinner } from "@/components/ui/States";
 
 const KEYS = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "scope", "resource", "response_type"];
+
+const CAN = [
+  "Start tasks that register on websites with an email and password",
+  "See the status and results of those tasks",
+  "Answer questions the agent asks while a task runs",
+];
+const CANNOT = [
+  "See your saved account passwords",
+  "Read your mailboxes or your saved personal details",
+];
 
 function Authorize() {
   const router = useRouter();
@@ -37,6 +49,7 @@ function Authorize() {
   }, [params, router, search]);
 
   async function decide(allow: boolean) {
+    if (busy) return;
     setBusy(allow ? "allow" : "deny");
     setError(null);
     try {
@@ -51,53 +64,59 @@ function Authorize() {
 
   if (error && !info) {
     return (
-      <div className="mx-auto max-w-sm space-y-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        <p className="flex items-center gap-2 font-medium"><ShieldAlert className="h-4 w-4" /> Can&apos;t continue</p>
-        <p>{error}</p>
+      <div role="alert" className="mx-auto max-w-md space-y-2 rounded-lg border border-danger-line bg-danger-soft p-5 text-sm">
+        <p className="flex items-center gap-2 font-medium text-danger"><ShieldAlert className="h-4 w-4" aria-hidden="true" /> Cannot continue</p>
+        <p className="text-ink">{error}</p>
+        <p className="text-xs text-muted">No access was granted. You can close this page.</p>
       </div>
     );
   }
-  if (!info) {
-    return <div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
+  if (!info) return <PageSpinner label="Checking the request" />;
 
   return (
-    <div className="mx-auto max-w-sm space-y-5">
+    <div className="mx-auto max-w-md space-y-5">
       <div className="flex items-center gap-2">
-        <ShieldCheck className="h-5 w-5 text-accent" />
-        <h1 className="text-lg font-semibold">Allow {info.client_name}?</h1>
+        <ShieldCheck className="h-5 w-5 text-accent" aria-hidden="true" />
+        <h1 className="text-lg font-semibold tracking-tight">Allow {info.client_name}?</h1>
       </div>
-      <p className="text-sm text-black/70">
-        <span className="font-medium">{info.client_name}</span>
-        {info.redirect_host && <span className="text-black/50"> ({info.redirect_host})</span>} wants to use your Temp Identity
-        Agent account.
+
+      <div className="rounded-lg border border-line bg-surface p-4 text-sm">
+        <dl className="space-y-2">
+          <div className="flex justify-between gap-4"><dt className="text-muted">Application</dt><dd className="break-words text-right font-medium">{info.client_name}</dd></div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted">Returns you to</dt>
+            <dd className="break-all text-right font-mono text-xs">{info.redirect_host ?? "Unknown address"}</dd>
+          </div>
+        </dl>
+        {!info.redirect_host && (
+          <div className="mt-3"><InlineMessage tone="warning">The return address could not be verified. Only continue if you started this connection yourself.</InlineMessage></div>
+        )}
+      </div>
+
+      <p className="text-sm text-muted">
+        <span className="font-medium text-ink">{info.client_name}</span> is asking to use your Temp Identity Agent account. Only approve this if you started the connection from that app.
       </p>
-      <ul className="space-y-2 rounded-md border border-black/10 bg-white p-4 text-sm">
-        {[
-          "Start jobs that register on websites with an email and password",
-          "See the status and results of those jobs",
-          "Answer questions the agent asks while a job runs",
-        ].map((t) => (
-          <li key={t} className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" /> {t}</li>
-        ))}
-      </ul>
-      <p className="text-xs text-black/50">
-        It can&apos;t see your saved passwords. You can disconnect it any time from Settings, under the MCP section.
-      </p>
-      {error && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+
+      <section aria-labelledby="can" className="rounded-lg border border-line bg-surface p-4">
+        <h2 id="can" className="mb-2 text-sm font-semibold">It will be able to</h2>
+        <ul className="space-y-2 text-sm">
+          {CAN.map((t) => (
+            <li key={t} className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" /> {t}</li>
+          ))}
+        </ul>
+        <h2 className="mb-2 mt-4 text-sm font-semibold">It will not be able to</h2>
+        <ul className="space-y-2 text-sm">
+          {CANNOT.map((t) => (
+            <li key={t} className="flex items-start gap-2"><XCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" /> {t}</li>
+          ))}
+        </ul>
+      </section>
+
+      <p className="text-xs text-muted">You can disconnect it at any time in Settings, under Developer and MCP.</p>
+      {error && <InlineMessage tone="danger">{error}</InlineMessage>}
       <div className="flex gap-3">
-        <button
-          onClick={() => decide(true)} disabled={busy !== null}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
-        >
-          {busy === "allow" && <Loader2 className="h-4 w-4 animate-spin" />} Allow
-        </button>
-        <button
-          onClick={() => decide(false)} disabled={busy !== null}
-          className="flex-1 rounded-md border border-black/15 px-4 py-2 text-sm hover:bg-black/5 disabled:opacity-60"
-        >
-          Deny
-        </button>
+        <Button variant="primary" className="flex-1" onClick={() => void decide(true)} loading={busy === "allow"} disabled={busy !== null}>Allow</Button>
+        <Button className="flex-1" onClick={() => void decide(false)} loading={busy === "deny"} disabled={busy !== null}>Deny</Button>
       </div>
     </div>
   );
@@ -105,7 +124,7 @@ function Authorize() {
 
 export default function OAuthAuthorizePage() {
   return (
-    <Suspense fallback={<div className="flex justify-center py-16 text-black/40"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+    <Suspense fallback={<PageSpinner />}>
       <Authorize />
     </Suspense>
   );
