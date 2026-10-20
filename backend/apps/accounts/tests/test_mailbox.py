@@ -192,3 +192,45 @@ class TestMcpMailboxTools:
         account, _ = make_account(other_user)
         out, err = mcp("check_mailbox", account_id=str(account.id))
         assert err and "No such account" in json.dumps(out)
+
+
+class TestVaultEntryAlwaysCreated:
+    def _job(self, user, kind="registration"):
+        from apps.identities import service as identity_service
+        from apps.registration.models import RegistrationJob, TargetWebsite
+
+        site = TargetWebsite.objects.create(domain="mobilesasa.com", registration_url="https://mobilesasa.com/register")
+        return RegistrationJob.objects.create(
+            user=user, target_website=site, kind=kind, state="completed",
+            identity=identity_service.create_temporary_identity(user))
+
+    def test_form_complete_is_refused_on_registration_jobs(self, user):
+        from types import SimpleNamespace
+
+        import pytest
+
+        from apps.ai_agent.context import AgentContext
+        from apps.ai_agent.tools import _handle_form_complete
+        from apps.common.exceptions import RegistrationFailedError
+
+        job = self._job(user)
+        job.state = "analyzing"
+        job.save()
+        with pytest.raises(RegistrationFailedError, match="registration.mark_complete"):
+            _handle_form_complete(AgentContext(job=job), SimpleNamespace(submitted=[], note=""))
+
+    def test_backfill_creates_missing_entries_once(self, user):
+        from django.core.management import call_command
+
+        from apps.accounts.models import TemporaryAccount
+
+        job = self._job(user)
+        assert not TemporaryAccount.objects.filter(job=job).exists()
+        call_command("backfill_vault_accounts")
+        call_command("backfill_vault_accounts")
+        assert TemporaryAccount.objects.filter(job=job).count() == 1
+
+    def test_form_jobs_get_no_vault_entry(self, user):
+        from apps.accounts.service import ensure_vault_account
+
+        assert ensure_vault_account(self._job(user, kind="form")) is None

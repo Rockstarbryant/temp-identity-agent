@@ -291,6 +291,11 @@ def _handle_site_report_auth_methods(ctx: AgentContext, args: AuthMethodsArgs) -
 
 
 def _handle_form_complete(ctx: AgentContext, args: FormCompleteArgs) -> dict:
+    if ctx.job.kind != RegistrationJob.Kind.FORM:
+        raise RegistrationFailedError(
+            "form.complete is only for form-filling jobs. This job creates an account: finish it with "
+            "registration.mark_complete once the account is created and verified."
+        )
     ctx.job.result = {"submitted": [a.model_dump() for a in args.submitted], "note": args.note}
     ctx.job.state = RegistrationJob.State.COMPLETED
     ctx.job.completed_at = timezone.now()

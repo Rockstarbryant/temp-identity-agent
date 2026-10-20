@@ -220,6 +220,11 @@ class AgentRunner:
 
         self.agent_session.total_steps = step_index
         self.agent_session.save(update_fields=["total_steps", "updated_at"])
+        if self.job.state == RegistrationJob.State.COMPLETED:
+            ensure_db_connection()
+            from apps.accounts.service import ensure_vault_account
+
+            ensure_vault_account(self.job)  # safety net: a finished sign-up always lands in the vault
         if track_playbook:
             ensure_db_connection()
             playbooks.finalize(self.job, recorder, used_playbook, replay_ok)
