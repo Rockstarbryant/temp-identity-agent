@@ -42,7 +42,7 @@ function MailboxesInner() {
           icon={<Mail className="h-4 w-4" aria-hidden="true" />}
           title="No mailboxes yet"
           description="Each account the agent creates gets a mailbox. Start a task and it will appear here."
-          action={<Link href="/" className={buttonClass("primary")}>Start a task</Link>}
+          action={<Link href="/new" className={buttonClass("primary")}>Start a task</Link>}
         />
       ) : (
         <div className="space-y-5">

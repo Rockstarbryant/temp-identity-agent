@@ -84,7 +84,7 @@ export default function AccountTypeCard({ mode, emailConnected, onChange }: Prop
       )}
       {error && <div className="mt-3"><InlineMessage tone="danger">{error}</InlineMessage></div>}
       <p className="mt-3 text-xs text-muted">
-        This applies to new registration tasks. Filling in a form (<Link href="/" className="text-accent-strong underline">paste a Google Form on Home</Link>)
+        This applies to new registration tasks. Filling in a form (<Link href="/new" className="text-accent-strong underline">paste a Google Form on Home</Link>)
         does not create an account, so it ignores this setting.
       </p>
     </Section>

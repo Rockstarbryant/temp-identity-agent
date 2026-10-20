@@ -123,7 +123,7 @@ export default function ActivityPage() {
                 {!clearing && <Trash2 className="h-4 w-4" aria-hidden="true" />} Clear finished ({clearable})
               </Button>
             )}
-            <Link href="/" className={buttonClass("primary")}>
+            <Link href="/new" className={buttonClass("primary")}>
               <Plus className="h-4 w-4" aria-hidden="true" /> New task
             </Link>
           </>
@@ -161,7 +161,7 @@ export default function ActivityPage() {
           icon={<Activity className="h-4 w-4" aria-hidden="true" />}
           title="No tasks yet"
           description="Start one from Home and its progress will show up here."
-          action={<Link href="/" className={buttonClass("primary")}>Start a task</Link>}
+          action={<Link href="/new" className={buttonClass("primary")}>Start a task</Link>}
         />
       ) : visible.length === 0 ? (
         <EmptyState title="Nothing matches this filter" action={<Button onClick={() => setFilter("all")}>Show all tasks</Button>} />

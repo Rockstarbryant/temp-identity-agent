@@ -47,7 +47,7 @@ export default function IdentityVaultPage() {
           icon={<KeyRound className="h-4 w-4" aria-hidden="true" />}
           title="No accounts in your vault"
           description="When a registration task completes, the account and its credentials are saved here."
-          action={<Link href="/" className={buttonClass("primary")}>Start a task</Link>}
+          action={<Link href="/new" className={buttonClass("primary")}>Start a task</Link>}
         />
       ) : (
         <>

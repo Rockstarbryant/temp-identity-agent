@@ -30,6 +30,8 @@
   --c-danger-soft: 254 242 242;
   --c-danger-line: 254 202 202;
   --c-danger-fill: 185 28 28;
+  --c-warm: 216 164 91;
+  --c-deep: 23 23 23;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -56,6 +58,8 @@
     --c-danger-soft: 42 16 16;
     --c-danger-line: 127 29 29;
     --c-danger-fill: 185 28 28;
+    --c-warm: 216 164 91;
+    --c-deep: 31 31 31;
   }
 }
 
@@ -82,6 +86,88 @@
   --c-danger-soft: 42 16 16;
   --c-danger-line: 127 29 29;
   --c-danger-fill: 185 28 28;
+  --c-warm: 216 164 91;
+  --c-deep: 31 31 31;
+}
+
+
+/*
+ * Public homepage theme. Same token names as the app, different values (green, calm, editorial),
+ * scoped to the .marketing wrapper so the signed-in workspace keeps its own look.
+ */
+.marketing {
+  --c-canvas: 248 248 245;
+  --c-surface: 255 255 255;
+  --c-subtle: 234 242 236;
+  --c-ink: 23 34 31;
+  --c-muted: 101 113 107;
+  --c-line: 228 232 227;
+  --c-line-strong: 203 211 204;
+  --c-accent: 39 103 73;
+  --c-accent-strong: 39 103 73;
+  --c-accent-fill: 39 103 73;
+  --c-accent-soft: 234 242 236;
+  --c-deep: 24 60 50;
+  --c-warm: 216 164 91;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .marketing {
+    --c-canvas: 15 23 20;
+    --c-surface: 22 33 29;
+    --c-subtle: 29 43 37;
+    --c-ink: 232 239 234;
+    --c-muted: 160 173 165;
+    --c-line: 40 56 49;
+    --c-line-strong: 60 80 70;
+    --c-accent: 110 190 145;
+    --c-accent-strong: 134 204 165;
+    --c-accent-fill: 39 103 73;
+    --c-accent-soft: 25 52 40;
+    --c-deep: 11 38 31;
+  }
+}
+
+:root[data-theme="dark"] .marketing {
+  --c-canvas: 15 23 20;
+  --c-surface: 22 33 29;
+  --c-subtle: 29 43 37;
+  --c-ink: 232 239 234;
+  --c-muted: 160 173 165;
+  --c-line: 40 56 49;
+  --c-line-strong: 60 80 70;
+  --c-accent: 110 190 145;
+  --c-accent-strong: 134 204 165;
+  --c-accent-fill: 39 103 73;
+  --c-accent-soft: 25 52 40;
+  --c-deep: 11 38 31;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Entrance motion: CSS only, content is fully visible without it. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.rise {
+  animation: rise 0.6s ease-out both;
+}
+.rise-2 { animation-delay: 0.08s; }
+.rise-3 { animation-delay: 0.16s; }
+
+/* Where supported, sections ease in as they scroll into view. Elsewhere they are simply there. */
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: rise linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 35%;
+  }
 }
 
 @layer base {

@@ -3,11 +3,13 @@ import "./globals.css";
 import AppShell from "@/components/shell/AppShell";
 import { FeedbackProvider } from "@/components/ui/Feedback";
 import PwaRegister from "@/components/pwa/PwaRegister";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Temp Identity Agent",
-  description: "Create a temporary account without using your personal email.",
-  applicationName: "Temp Identity Agent",
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
   icons: { icon: "/icons/192", apple: "/icons/apple-180" },
   appleWebApp: { capable: true, title: "Temp Identity", statusBarStyle: "default" },
 };

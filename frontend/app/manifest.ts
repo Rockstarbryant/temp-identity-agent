@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Temp Identity Agent",
     short_name: "Temp Identity",
     description: "Create a temporary account without using your personal email.",
-    start_url: "/",
+    start_url: "/new",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
@@ -19,7 +19,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/maskable-512", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
     shortcuts: [
-      { name: "New task", url: "/", description: "Start a registration or form task" },
+      { name: "New task", url: "/new", description: "Start a registration or form task" },
       { name: "Activity", url: "/dashboard" },
       { name: "Mailboxes", url: "/mailboxes" },
       { name: "Identity Vault", url: "/accounts" },

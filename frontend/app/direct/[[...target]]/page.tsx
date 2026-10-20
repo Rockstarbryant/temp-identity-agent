@@ -82,7 +82,7 @@ export default function DirectPage() {
         <InlineMessage tone="danger">
           That link did not contain a website address the agent can use. Use a full address such as https://example.com/signup.
         </InlineMessage>
-        <Link href="/" className={buttonClass("primary")}>Go to Home</Link>
+        <Link href="/new" className={buttonClass("primary")}>Go to Home</Link>
       </div>
     );
   }
@@ -131,7 +131,7 @@ export default function DirectPage() {
         <Button variant="primary" className="flex-1" onClick={start} loading={submitting}>
           {form ? "Fill in form" : "Start task"} {!submitting && <ArrowRight className="h-4 w-4" aria-hidden="true" />}
         </Button>
-        <Link href="/" className={buttonClass("secondary")}>Cancel</Link>
+        <Link href="/new" className={buttonClass("secondary")}>Cancel</Link>
       </div>
     </div>
   );

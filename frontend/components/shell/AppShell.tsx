@@ -22,7 +22,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Home", icon: Home, match: (p) => p === "/" },
+  { href: "/new", label: "Home", icon: Home, match: (p) => p.startsWith("/new") },
   { href: "/dashboard", label: "Activity", icon: Activity, match: (p) => p.startsWith("/dashboard") || p.startsWith("/jobs") },
   { href: "/mailboxes", label: "Mailboxes", icon: Mail, match: (p) => p.startsWith("/mailboxes") },
   { href: "/accounts", label: "Identity Vault", icon: KeyRound, match: (p) => p.startsWith("/accounts") },
@@ -32,9 +32,9 @@ const NAV: NavItem[] = [
 const AUTH_ROUTES = ["/login", "/register"];
 const COLLAPSE_KEY = "tia_sidebar_collapsed";
 
-function Brand({ compact = false }: { compact?: boolean }) {
+function Brand({ compact = false, href = "/" }: { compact?: boolean; href?: string }) {
   return (
-    <Link href="/" className="flex items-center gap-2 rounded-md font-semibold text-ink" aria-label="Temp Identity Agent, home">
+    <Link href={href} className="flex items-center gap-2 rounded-md font-semibold text-ink" aria-label="Temp Identity Agent, home">
       <ShieldCheck className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
       {!compact && <span className="whitespace-nowrap text-sm">Temp Identity Agent</span>}
     </Link>
@@ -85,6 +85,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
   }
 
+  // The public homepage (/) is a standalone marketing page with its own navigation and footer.
+  if (pathname === "/") return <>{children}</>;
+
   const bare = !authed || AUTH_ROUTES.includes(pathname);
 
   if (bare) {
@@ -126,7 +129,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className={cn("flex h-14 items-center border-b border-line", collapsed ? "justify-center" : "px-4")}>
-          <Brand compact={collapsed} />
+          <Brand compact={collapsed} href="/new" />
         </div>
         <nav aria-label="Primary" className="flex-1 space-y-1 p-2">
           {NAV.map(({ href, label, icon: Icon, match }) => {
@@ -172,7 +175,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
         >
           <div className="flex h-14 items-center justify-between gap-2 px-4 md:px-8">
-            <div className="md:hidden"><Brand /></div>
+            <div className="md:hidden"><Brand href="/new" /></div>
             <div className="hidden md:block" />
             <div className="flex items-center gap-1">
               <InstallButton />

@@ -27,9 +27,12 @@ const config: Config = {
         accent: { DEFAULT: v("accent"), strong: v("accent-strong"), soft: v("accent-soft"), fill: v("accent-fill") },
         success: { DEFAULT: v("success"), soft: v("success-soft"), line: v("success-line") },
         warning: { DEFAULT: v("warning"), soft: v("warning-soft"), line: v("warning-line") },
+        warm: v("warm"),
+        deep: v("deep"),
         danger: { DEFAULT: v("danger"), soft: v("danger-soft"), line: v("danger-line"), fill: v("danger-fill") },
       },
       fontFamily: {
+        display: ["ui-serif", "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", "Cambria", "serif"],
         sans: [
           "Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto",
           "Helvetica Neue", "Arial", "sans-serif",
