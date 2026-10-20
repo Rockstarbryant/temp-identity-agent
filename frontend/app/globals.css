@@ -2,9 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme tokens as space-separated RGB channels (consumed by tailwind.config.ts).
+ * Light is the default. Dark applies when the user picks it, or when they have not chosen
+ * and the operating system prefers dark. Choosing "Light" sets data-theme="light".
+ */
+:root {
+  color-scheme: light;
+  --c-canvas: 250 250 250;
+  --c-surface: 255 255 255;
+  --c-subtle: 245 245 245;
+  --c-ink: 23 23 23;
+  --c-muted: 115 115 115;
+  --c-line: 229 229 229;
+  --c-line-strong: 212 212 212;
+  --c-accent: 99 102 241;
+  --c-accent-strong: 79 70 229;
+  --c-accent-fill: 79 70 229;
+  --c-accent-soft: 238 242 255;
+  --c-success: 21 128 61;
+  --c-success-soft: 240 253 244;
+  --c-success-line: 187 247 208;
+  --c-warning: 180 83 9;
+  --c-warning-soft: 255 251 235;
+  --c-warning-line: 253 230 138;
+  --c-danger: 185 28 28;
+  --c-danger-soft: 254 242 242;
+  --c-danger-line: 254 202 202;
+  --c-danger-fill: 185 28 28;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --c-canvas: 10 10 10;
+    --c-surface: 20 20 20;
+    --c-subtle: 31 31 31;
+    --c-ink: 237 237 237;
+    --c-muted: 163 163 163;
+    --c-line: 38 38 38;
+    --c-line-strong: 64 64 64;
+    --c-accent: 129 140 248;
+    --c-accent-strong: 165 180 252;
+    --c-accent-fill: 79 70 229;
+    --c-accent-soft: 30 33 64;
+    --c-success: 74 222 128;
+    --c-success-soft: 15 42 26;
+    --c-success-line: 22 101 52;
+    --c-warning: 251 191 36;
+    --c-warning-soft: 42 29 8;
+    --c-warning-line: 133 77 14;
+    --c-danger: 248 113 113;
+    --c-danger-soft: 42 16 16;
+    --c-danger-line: 127 29 29;
+    --c-danger-fill: 185 28 28;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-canvas: 10 10 10;
+  --c-surface: 20 20 20;
+  --c-subtle: 31 31 31;
+  --c-ink: 237 237 237;
+  --c-muted: 163 163 163;
+  --c-line: 38 38 38;
+  --c-line-strong: 64 64 64;
+  --c-accent: 129 140 248;
+  --c-accent-strong: 165 180 252;
+  --c-accent-fill: 79 70 229;
+  --c-accent-soft: 30 33 64;
+  --c-success: 74 222 128;
+  --c-success-soft: 15 42 26;
+  --c-success-line: 22 101 52;
+  --c-warning: 251 191 36;
+  --c-warning-soft: 42 29 8;
+  --c-warning-line: 133 77 14;
+  --c-danger: 248 113 113;
+  --c-danger-soft: 42 16 16;
+  --c-danger-line: 127 29 29;
+  --c-danger-fill: 185 28 28;
+}
+
 @layer base {
   html {
-    color-scheme: light;
     -webkit-text-size-adjust: 100%;
   }
 

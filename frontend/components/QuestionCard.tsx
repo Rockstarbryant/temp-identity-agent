@@ -59,7 +59,7 @@ export default function QuestionCard({ jobId, question, onDone }: Props) {
               type="button" key={o} role="radio" aria-checked={answer === o} onClick={() => setAnswer(o)}
               className={cn(
                 "rounded-md border px-3 py-1.5 text-sm transition-colors",
-                answer === o ? "border-accent-strong bg-accent-strong text-white" : "border-line-strong bg-surface hover:bg-subtle",
+                answer === o ? "border-accent-fill bg-accent-fill text-white" : "border-line-strong bg-surface hover:bg-subtle",
               )}
             >
               {o}

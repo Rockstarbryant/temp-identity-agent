@@ -73,7 +73,7 @@ export default function NotificationRow({
             if (!n.read) void markRead([n.id]).catch(() => undefined);
             onNavigate?.();
           }}
-          className="flex min-w-0 flex-1 items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-black/[0.02]"
+          className="flex min-w-0 flex-1 items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-subtle"
         >
           {content}
         </Link>

@@ -1,29 +1,33 @@
 import type { Config } from "tailwindcss";
 
+/** Colour tokens are CSS variables (see app/globals.css) so light and dark themes share one set of class names. */
+const v = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
 /**
  * Design tokens. Every colour used by the UI comes from this file; components use the
  * semantic names (canvas, surface, ink, muted, line, accent, success, warning, danger)
  * and never raw hex values.
  *
  * `accent` (#6366F1) is the brand colour for focus rings and indicators.
- * `accent-strong` (#4F46E5) is used for filled buttons and text links, where white text
- * on #6366F1 would fall just under the 4.5:1 WCAG AA contrast ratio.
+ * `accent-fill` (#4F46E5 in both themes) is the background of filled buttons, so white text
+ * keeps 4.5:1 contrast. `accent-strong` is the accent as text/link colour and is lighter in dark mode.
+ * `danger-fill` plays the same role for destructive buttons.
  */
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        canvas: "#FAFAFA",
-        surface: "#FFFFFF",
-        subtle: "#F5F5F5",
-        ink: "#171717",
-        muted: "#737373",
-        line: { DEFAULT: "#E5E5E5", strong: "#D4D4D4" },
-        accent: { DEFAULT: "#6366F1", strong: "#4F46E5", soft: "#EEF2FF" },
-        success: { DEFAULT: "#15803D", soft: "#F0FDF4", line: "#BBF7D0" },
-        warning: { DEFAULT: "#B45309", soft: "#FFFBEB", line: "#FDE68A" },
-        danger: { DEFAULT: "#B91C1C", soft: "#FEF2F2", line: "#FECACA" },
+        canvas: v("canvas"),
+        surface: v("surface"),
+        subtle: v("subtle"),
+        ink: v("ink"),
+        muted: v("muted"),
+        line: { DEFAULT: v("line"), strong: v("line-strong") },
+        accent: { DEFAULT: v("accent"), strong: v("accent-strong"), soft: v("accent-soft"), fill: v("accent-fill") },
+        success: { DEFAULT: v("success"), soft: v("success-soft"), line: v("success-line") },
+        warning: { DEFAULT: v("warning"), soft: v("warning-soft"), line: v("warning-line") },
+        danger: { DEFAULT: v("danger"), soft: v("danger-soft"), line: v("danger-line"), fill: v("danger-fill") },
       },
       fontFamily: {
         sans: [

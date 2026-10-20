@@ -39,7 +39,7 @@ function VerificationPanel({ msg }: { msg: MailMessage }) {
             href={link}
             target="_blank"
             rel="noopener noreferrer nofollow"
-            className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md bg-accent-strong px-3 py-2 text-sm font-medium text-white hover:bg-accent-strong/90"
+            className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md bg-accent-fill px-3 py-2 text-sm font-medium text-white hover:bg-accent-fill/90"
           >
             <ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="truncate">Open link on {hostOf(link) || "the site"}</span>

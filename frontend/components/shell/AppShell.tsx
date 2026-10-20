@@ -10,6 +10,7 @@ import { isAuthenticated, logout } from "@/lib/api";
 import { stopNotifications } from "@/lib/notifications";
 import NotificationBell from "@/components/NotificationBell";
 import { buttonClass } from "@/components/ui/Button";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 import { cn } from "@/components/ui/cn";
 
 interface NavItem {
@@ -91,12 +92,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <header className="border-b border-line bg-surface">
           <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 md:px-8">
             <Brand />
-            {!AUTH_ROUTES.includes(pathname) && (
-              <nav aria-label="Account" className="flex items-center gap-2">
-                <Link href="/login" className={buttonClass("ghost", "sm")}>Log in</Link>
-                <Link href="/register" className={buttonClass("primary", "sm")}>Sign up</Link>
-              </nav>
-            )}
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              {!AUTH_ROUTES.includes(pathname) && (
+                <nav aria-label="Account" className="flex items-center gap-2">
+                  <Link href="/login" className={buttonClass("ghost", "sm")}>Log in</Link>
+                  <Link href="/register" className={buttonClass("primary", "sm")}>Sign up</Link>
+                </nav>
+              )}
+            </div>
           </div>
         </header>
         <main id="main" className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-12">{children}</main>
@@ -170,6 +174,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <div className="md:hidden"><Brand /></div>
             <div className="hidden md:block" />
             <div className="flex items-center gap-1">
+              <ThemeToggle />
               <NotificationBell />
               <button
                 type="button"

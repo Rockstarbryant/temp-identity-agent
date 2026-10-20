@@ -47,7 +47,7 @@ export default function Overlay({ open, onClose, labelledBy, describedBy, side =
         if (e.target === e.currentTarget) onClose();
       }}
       className={cn(
-        "bg-surface p-0 text-ink backdrop:bg-ink/30",
+        "bg-surface p-0 text-ink backdrop:bg-black/50",
         side === "center"
           ? "w-[calc(100%-2rem)] max-w-md rounded-lg border border-line shadow-sm"
           : "fixed inset-y-0 left-auto right-0 m-0 h-full max-h-none w-full max-w-md border-l border-line",
