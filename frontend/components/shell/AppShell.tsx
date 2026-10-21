@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity, Home, KeyRound, LogOut, Mail, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck,
+  Activity, Home, KeyRound, LogOut, Mail, MessageSquare, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck,
 } from "lucide-react";
 import { isAuthenticated, logout } from "@/lib/api";
 import { stopNotifications } from "@/lib/notifications";
@@ -23,6 +23,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/new", label: "Home", icon: Home, match: (p) => p.startsWith("/new") },
+  { href: "/chat", label: "Chat", icon: MessageSquare, match: (p) => p.startsWith("/chat") },
   { href: "/dashboard", label: "Activity", icon: Activity, match: (p) => p.startsWith("/dashboard") || p.startsWith("/jobs") },
   { href: "/mailboxes", label: "Mailboxes", icon: Mail, match: (p) => p.startsWith("/mailboxes") },
   { href: "/accounts", label: "Identity Vault", icon: KeyRound, match: (p) => p.startsWith("/accounts") },
@@ -205,7 +206,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        <ul className="grid grid-cols-5">
+        <ul className="grid grid-cols-6">
           {NAV.map(({ href, label, icon: Icon, match }) => {
             const active = match(pathname);
             const short = label === "Identity Vault" ? "Vault" : label;

@@ -157,3 +157,25 @@ def test_ai_outage_returns_503_and_clear_history(auth_client, account):
     AccountChatMessage.objects.create(account=account, role="user", content="x")
     assert auth_client.delete(f"/api/accounts/{account.id}/chat/").status_code == 204
     assert auth_client.get(f"/api/accounts/{account.id}/chat/").data["messages"] == []
+
+
+def test_chat_list_orders_by_activity_and_flags_working_tasks(auth_client, user, account):
+    site = TargetWebsite.objects.create(domain="other.com", registration_url="https://other.com")
+    ident = identity_service.create_temporary_identity(user)
+    job = RegistrationJob.objects.create(user=user, target_website=site, state="completed", identity=ident)
+    other = TemporaryAccount.objects.create(job=job, identity=ident, website=site)
+    AccountChatMessage.objects.create(account=account, role="user", content="hello")
+    AccountChatMessage.objects.create(account=account, role="assistant", content="hi there")
+    RegistrationJob.objects.create(user=user, target_website=site, kind="account_task", identity=ident, goal="x", state="analyzing")
+    r = auth_client.get("/api/chats/")
+    rows = {i["domain"]: i for i in r.data["results"]}
+    assert r.data["results"][0]["domain"] == "mobilesasa.com"  # has the newest message
+    assert rows["mobilesasa.com"]["last_message"]["content"] == "hi there" and rows["mobilesasa.com"]["message_count"] == 2
+    assert rows["other.com"]["working"] is True and rows["other.com"]["last_message"] is None
+
+
+def test_chat_list_hides_deleted_and_other_users(auth_client, other_auth_client, account):
+    assert len(other_auth_client.get("/api/chats/").data["results"]) == 0
+    account.status = "deleted"
+    account.save()
+    assert len(auth_client.get("/api/chats/").data["results"]) == 0

@@ -109,7 +109,11 @@ export default function AccountDetailPage() {
           </Panel>
 
           {account.status === "active" && (
-            <Panel title="Chat with the agent" description="Ask about this account, check its mail, change saved details, or have the agent do something on the site.">
+            <Panel
+              title="Chat with the agent"
+              description="Ask about this account, check its mail, change saved details, or have the agent do something on the site."
+              actions={<Link href={`/chat?account=${account.id}`} className={buttonClass("ghost", "sm")}>Open full chat</Link>}
+            >
               <AccountChat accountId={account.id} domain={account.domain} />
             </Panel>
           )}

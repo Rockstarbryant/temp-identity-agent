@@ -177,3 +177,39 @@ class AccountChatView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         account.chat_messages.all().delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ChatListView(APIView):
+    """GET /api/chats/ — every vault account as a conversation, most recently active first."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import AccountChatMessage
+        from apps.registration.models import RegistrationJob
+
+        accounts = list(
+            TemporaryAccount.objects.filter(job__user=request.user).exclude(status=TemporaryAccount.Status.DELETED)
+            .select_related("identity", "website")
+        )
+        ids = [a.id for a in accounts]
+        last, counts = {}, {}
+        for m in AccountChatMessage.objects.filter(account_id__in=ids).order_by("-created_at")[:2000]:
+            last.setdefault(m.account_id, m)
+            counts[m.account_id] = counts.get(m.account_id, 0) + 1
+        working = set(
+            RegistrationJob.objects.filter(
+                identity_id__in=[a.identity_id for a in accounts], kind=RegistrationJob.Kind.ACCOUNT_TASK)
+            .exclude(state__in=RegistrationJob.TERMINAL_STATES).values_list("identity_id", flat=True)
+        )
+        items = []
+        for a in accounts:
+            m = last.get(a.id)
+            items.append({
+                "account_id": str(a.id), "domain": a.website.domain, "email": a.identity.email, "status": a.status,
+                "message_count": counts.get(a.id, 0), "working": a.identity_id in working,
+                "last_message": {"role": m.role, "content": m.content[:140], "created_at": m.created_at} if m else None,
+                "last_activity": (m.created_at if m else a.created_at),
+            })
+        items.sort(key=lambda i: i["last_activity"], reverse=True)
+        return Response({"results": items})

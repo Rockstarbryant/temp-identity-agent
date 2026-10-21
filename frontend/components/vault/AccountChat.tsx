@@ -16,7 +16,15 @@ const SUGGESTIONS = [
   "Sign in and tell me what my dashboard shows",
 ];
 
-export default function AccountChat({ accountId, domain }: { accountId: string; domain: string }) {
+export default function AccountChat({
+  accountId, domain, tall = false, onActivity,
+}: {
+  accountId: string; domain: string;
+  /** Fill the available height (the Chat page) instead of a fixed-height box. */
+  tall?: boolean;
+  /** Called after a message is sent, cleared, or a task result arrives, so a list can refresh. */
+  onActivity?: () => void;
+}) {
   const confirm = useConfirm();
   const [chat, setChat] = useState<Chat | null>(null);
   const [text, setText] = useState("");
@@ -34,6 +42,9 @@ export default function AccountChat({ accountId, domain }: { accountId: string; 
   }, [accountId]);
 
   useEffect(() => {
+    setChat(null);
+    setError(null);
+    setText("");
     void load();
   }, [load]);
 
@@ -41,9 +52,9 @@ export default function AccountChat({ accountId, domain }: { accountId: string; 
   const working = !!chat?.active_job;
   useEffect(() => {
     if (!working) return;
-    const t = setInterval(() => void load(), 4000);
+    const t = setInterval(() => void load().then(() => onActivity?.()), 4000);
     return () => clearInterval(t);
-  }, [working, load]);
+  }, [working, load, onActivity]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -62,6 +73,7 @@ export default function AccountChat({ accountId, domain }: { accountId: string; 
     });
     try {
       setChat(await sendAccountChat(accountId, value));
+      onActivity?.();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "The agent could not answer. Try again.");
       setText(value);
@@ -86,14 +98,18 @@ export default function AccountChat({ accountId, domain }: { accountId: string; 
     if (!ok) return;
     await clearAccountChat(accountId);
     await load();
+    onActivity?.();
   }
 
   if (!chat) return <div className="flex justify-center py-6 text-muted"><Loader2 className="h-5 w-5 animate-spin" aria-label="Loading chat" /></div>;
 
   return (
-    <div className="space-y-3">
+    <div className={cn(tall ? "flex h-full min-h-0 flex-col gap-3" : "space-y-3")}>
       <div
-        className="max-h-[28rem] min-h-24 space-y-2.5 overflow-y-auto rounded-md border border-line bg-subtle/50 p-3"
+        className={cn(
+          "space-y-2.5 overflow-y-auto rounded-md border border-line bg-subtle/50 p-3",
+          tall ? "min-h-0 flex-1" : "max-h-[28rem] min-h-24",
+        )}
         role="log" aria-live="polite" aria-label={`Conversation about ${domain}`}
       >
         {chat.messages.length === 0 && (
@@ -140,7 +156,11 @@ export default function AccountChat({ accountId, domain }: { accountId: string; 
 
       {error && <InlineMessage tone="danger">{error}</InlineMessage>}
 
-      <form onSubmit={onSubmit} className="flex items-end gap-2">
+      {!chat.can_chat && (
+        <InlineMessage tone="info">This account has expired, so the agent can no longer act on it. You can still read this conversation.</InlineMessage>
+      )}
+
+      <form onSubmit={onSubmit} className={cn("flex items-end gap-2", !chat.can_chat && "hidden")}>
         <label htmlFor="account-chat-input" className="sr-only">Message to the agent</label>
         <textarea
           id="account-chat-input" value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={2000}

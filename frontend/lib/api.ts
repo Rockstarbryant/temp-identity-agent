@@ -595,6 +595,21 @@ export interface AccountChat {
   can_chat: boolean;
 }
 
+export interface ChatSummary {
+  account_id: string;
+  domain: string;
+  email: string;
+  status: "active" | "expired" | "deleted";
+  message_count: number;
+  working: boolean;
+  last_message: { role: "user" | "assistant"; content: string; created_at: string } | null;
+  last_activity: string;
+}
+
+export async function listChats() {
+  return request<{ results: ChatSummary[] }>("/api/chats/");
+}
+
 export async function getAccountChat(accountId: string) {
   return request<AccountChat>(`/api/accounts/${accountId}/chat/`);
 }
