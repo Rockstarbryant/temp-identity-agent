@@ -36,6 +36,8 @@ def _verb(job) -> str:
         return "Form"
     if job.kind == RegistrationJob.Kind.ACCOUNT_SETUP:
         return "Account connection"
+    if job.kind == RegistrationJob.Kind.ACCOUNT_TASK:
+        return "Task"
     return "Sign-up"
 
 

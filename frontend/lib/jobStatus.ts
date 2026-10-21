@@ -113,6 +113,7 @@ export function matchesFilter(state: string, filter: JobFilter): boolean {
 export function taskTypeLabel(job: Pick<RegistrationJob, "kind" | "account_mode">): string {
   if (job.kind === "form") return "Form fill";
   if (job.kind === "account_setup") return "Connect sign-in account";
+  if (job.kind === "account_task") return "Task on your account";
   return job.account_mode === "permanent" ? "Registration, permanent identity" : "Registration, temporary identity";
 }
 

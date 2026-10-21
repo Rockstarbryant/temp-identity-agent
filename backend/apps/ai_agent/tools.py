@@ -169,6 +169,8 @@ def _profile_values(user) -> dict[str, str]:
 
 def _handle_identity_create(ctx: AgentContext, args: NoArgs) -> dict:
     _require_auth_check(ctx)
+    if ctx.job.kind == RegistrationJob.Kind.ACCOUNT_TASK:
+        raise RegistrationFailedError("This account already exists. Call identity.get for its sign-in details; do not create a new identity.")
     if ctx.job.kind == RegistrationJob.Kind.FORM:
         raise RegistrationFailedError("This job fills in a form; it doesn't create an account. Use profile.get and user.ask instead.")
 
@@ -328,7 +330,7 @@ def _handle_registration_mark_complete(ctx: AgentContext, args: NoArgs) -> dict:
     ctx.job.completed_at = timezone.now()
     ctx.job.save(update_fields=["state", "completed_at", "updated_at"])
 
-    if ctx.identity is not None:
+    if ctx.identity is not None and ctx.job.kind != RegistrationJob.Kind.ACCOUNT_TASK:
         from apps.accounts.models import TemporaryAccount
 
         TemporaryAccount.objects.get_or_create(

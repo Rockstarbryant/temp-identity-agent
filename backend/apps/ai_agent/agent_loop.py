@@ -85,6 +85,10 @@ class AgentRunner:
 
         if self.job.kind == RegistrationJob.Kind.FORM and not resume:
             instruction = f"Fill in and submit the form at {target_url}."
+        elif self.job.kind == RegistrationJob.Kind.ACCOUNT_TASK and not resume:
+            instruction = (
+                f"Sign in to the existing account on {target_url} and do this task: {self.job.goal}"
+            )
         elif resume:
             instruction = (
                 f"Resume registering an account on {target_url}. A human has just "

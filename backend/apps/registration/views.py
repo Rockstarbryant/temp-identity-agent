@@ -114,6 +114,7 @@ class RegistrationJobRetryView(APIView):
             request.user, old.target_url or old.target_website.registration_url,
             source=old.source, goal=old.goal, account_mode=old.account_mode, kind=old.kind,
             audit_extra={"retry_of": str(old.id)},
+            identity=old.identity if old.kind == RegistrationJob.Kind.ACCOUNT_TASK else None,
         )
         return Response(RegistrationJobSerializer(job).data, status=status.HTTP_201_CREATED)
 

@@ -76,6 +76,7 @@ class RegistrationJob(UUIDTimeStampedModel):
         REGISTRATION = "registration", "Account registration"
         FORM = "form", "Fill in a form"
         ACCOUNT_SETUP = "account_setup", "Connect a Google/Microsoft account"
+        ACCOUNT_TASK = "account_task", "Task on an existing account"
 
     class Source(models.TextChoices):
         WEB = "web", "Web app"

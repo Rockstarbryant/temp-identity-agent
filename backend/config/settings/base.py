@@ -140,6 +140,7 @@ REST_FRAMEWORK = {
         "registration_jobs": "10/hour",
         # "Ask the agent about this mailbox" runs an AI call each time.
         "mailbox_ask": "30/hour",
+        "account_chat": "60/hour",
         # The live browser view polls about once a second while it is open.
         "live_view": "300/min",
         # External AI clients calling the MCP endpoint.

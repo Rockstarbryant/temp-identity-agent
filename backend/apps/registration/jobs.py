@@ -39,7 +39,7 @@ is_google_form_url = is_form_url  # old name
 
 
 def create_job(user, url: str, *, source: str = "web", goal: str = "", account_mode: str | None = None,
-               kind: str | None = None, audit_extra: dict | None = None) -> RegistrationJob:
+               kind: str | None = None, audit_extra: dict | None = None, identity=None) -> RegistrationJob:
     """Validate, create and enqueue a job. Raises ValidationError for problems the caller should show."""
     domain = urlparse(url).hostname
     if not domain:
@@ -47,7 +47,7 @@ def create_job(user, url: str, *, source: str = "web", goal: str = "", account_m
 
     kind = kind or (RegistrationJob.Kind.FORM if is_form_url(url) else RegistrationJob.Kind.REGISTRATION)
     mode = account_mode or UserPreferences.for_user(user).account_mode
-    if kind in (RegistrationJob.Kind.FORM, RegistrationJob.Kind.ACCOUNT_SETUP):
+    if kind in (RegistrationJob.Kind.FORM, RegistrationJob.Kind.ACCOUNT_SETUP, RegistrationJob.Kind.ACCOUNT_TASK):
         mode = RegistrationJob.AccountMode.TEMPORARY  # no account is created for a form
     if mode == RegistrationJob.AccountMode.PERMANENT and not EmailConnection.objects.filter(user=user).exists():
         raise ValidationError({
@@ -58,7 +58,7 @@ def create_job(user, url: str, *, source: str = "web", goal: str = "", account_m
     target_website, _ = TargetWebsite.objects.get_or_create(domain=domain, defaults={"registration_url": url})
     job = RegistrationJob.objects.create(
         user=user, target_website=target_website, target_url=url, kind=kind, source=source,
-        account_mode=mode, goal=goal[:1000],
+        account_mode=mode, goal=goal[:1000], identity=identity,
         # The budgets come from the environment (MAX_AGENT_STEPS / MAX_JOB_DURATION_SECONDS),
         # not from the model-field defaults.
         max_steps=settings.MAX_AGENT_STEPS, timeout_seconds=settings.MAX_JOB_DURATION_SECONDS,

@@ -258,7 +258,7 @@ export default function JobDetailPage() {
         </section>
       )}
 
-      {job.state === "completed" && job.kind === "registration" && job.result?.summary && (
+      {job.state === "completed" && (job.kind === "registration" || job.kind === "account_task") && job.result?.summary && (
         <Panel title="Information the agent found">
           <p className="text-sm">{job.result.summary}</p>
           {job.result.data && Object.keys(job.result.data).length > 0 && (

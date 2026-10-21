@@ -142,7 +142,7 @@ export interface RegistrationJob {
   model: string;
   /** Vault entry created by a completed job. */
   account_id: string | null;
-  kind: "registration" | "form" | "account_setup";
+  kind: "registration" | "form" | "account_setup" | "account_task";
   source: "web" | "mcp";
   account_mode: "temporary" | "permanent";
   created_at: string;
@@ -575,6 +575,39 @@ export async function askMailbox(accountId: string, question: string) {
     method: "POST",
     body: JSON.stringify({ question }),
   });
+}
+
+// --- Chat with the agent about one account ----------------------------------------------
+
+export interface AccountChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  kind: "text" | "task_started" | "task_result";
+  content: string;
+  job_id: string | null;
+  created_at: string;
+}
+
+export interface AccountChat {
+  messages: AccountChatMessage[];
+  /** A website task the agent is running for this account right now. */
+  active_job: { id: string; state: JobState } | null;
+  can_chat: boolean;
+}
+
+export async function getAccountChat(accountId: string) {
+  return request<AccountChat>(`/api/accounts/${accountId}/chat/`);
+}
+
+export async function sendAccountChat(accountId: string, message: string) {
+  return request<AccountChat>(`/api/accounts/${accountId}/chat/`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function clearAccountChat(accountId: string) {
+  return request<void>(`/api/accounts/${accountId}/chat/`, { method: "DELETE" });
 }
 
 // --- Notifications -----------------------------------------------------------------

@@ -112,3 +112,68 @@ class AccountMailboxAskView(APIView):
         AuditLog.objects.create(user=request.user, action="mailbox.asked", resource_type="TemporaryAccount",
                                 resource_id=str(account.id))
         return Response(result)
+
+
+class AccountChatView(APIView):
+    """
+    GET    /api/accounts/{id}/chat/ — the conversation, and the website task running now, if any.
+    POST   /api/accounts/{id}/chat/ {"message": "..."} — talk to the agent about this account.
+    DELETE /api/accounts/{id}/chat/ — clear the conversation.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_throttles(self):
+        return [ScopedRateThrottle()] if self.request.method == "POST" else []
+
+    throttle_scope = "account_chat"
+
+    def _account(self, request, pk):
+        account = get_object_or_404(
+            TemporaryAccount.objects.select_related("identity", "website", "job"), id=pk, job__user=request.user)
+        if account.status == TemporaryAccount.Status.DELETED:
+            return None
+        return account
+
+    @staticmethod
+    def _item(m):
+        return {"id": str(m.id), "role": m.role, "kind": m.kind, "content": m.content,
+                "job_id": str(m.job_id) if m.job_id else None, "created_at": m.created_at}
+
+    def _state(self, account):
+        from apps.accounts.chat import _active_task, history
+
+        active = _active_task(account)
+        return {"messages": [self._item(m) for m in history(account)],
+                "active_job": {"id": str(active.id), "state": active.state} if active else None,
+                "can_chat": account.status == TemporaryAccount.Status.ACTIVE}
+
+    def get(self, request, pk):
+        account = self._account(request, pk)
+        if account is None:
+            return Response({"detail": "This account has been deleted."}, status=status.HTTP_410_GONE)
+        return Response(self._state(account))
+
+    def post(self, request, pk):
+        from apps.accounts import chat
+
+        account = self._account(request, pk)
+        if account is None:
+            return Response({"detail": "This account has been deleted."}, status=status.HTTP_410_GONE)
+        if account.status != TemporaryAccount.Status.ACTIVE:
+            return Response({"detail": "This account has expired, so the agent can't act on it."}, status=status.HTTP_400_BAD_REQUEST)
+        text = str(request.data.get("message", "")).strip()
+        if not text:
+            return Response({"detail": "Write a message first."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            chat.send(account, request.user, text, ip=request.META.get("REMOTE_ADDR"))
+        except chat.ChatUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(self._state(account))
+
+    def delete(self, request, pk):
+        account = self._account(request, pk)
+        if account is None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        account.chat_messages.all().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

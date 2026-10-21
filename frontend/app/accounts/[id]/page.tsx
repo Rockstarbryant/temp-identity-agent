@@ -10,6 +10,7 @@ import { useCachedData } from "@/lib/useCachedData";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import { describeExpiry, formatDateTime } from "@/lib/format";
 import MailboxPanel from "@/components/MailboxPanel";
+import AccountChat from "@/components/vault/AccountChat";
 import CredentialsPanel from "@/components/vault/CredentialsPanel";
 import { AccountStatusBadge, AccountTypeBadges } from "@/components/vault/AccountBadges";
 import Button, { buttonClass } from "@/components/ui/Button";
@@ -106,6 +107,12 @@ export default function AccountDetailPage() {
           <Panel title="Credentials" description="Reveal the password only when you need it.">
             <CredentialsPanel account={account} />
           </Panel>
+
+          {account.status === "active" && (
+            <Panel title="Chat with the agent" description="Ask about this account, check its mail, change saved details, or have the agent do something on the site.">
+              <AccountChat accountId={account.id} domain={account.domain} />
+            </Panel>
+          )}
 
           <Panel
             title="Mailbox"
