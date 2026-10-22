@@ -577,27 +577,41 @@ export async function askMailbox(accountId: string, question: string) {
   });
 }
 
-// --- Chat with the agent about one account ----------------------------------------------
+// --- Chat -----------------------------------------------------------------------------------
 
-export interface AccountChatMessage {
+export interface ChatAction {
+  name: string;
+  label: string;
+  ok: boolean;
+}
+
+export interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
   kind: "text" | "task_started" | "task_result";
   content: string;
+  /** What the assistant did to produce this reply (checked the mailbox, started a task, ...). */
+  actions: ChatAction[];
+  /** For task messages: the task whose progress is shown inline. */
   job_id: string | null;
   created_at: string;
 }
 
-export interface AccountChat {
-  messages: AccountChatMessage[];
-  /** A website task the agent is running for this account right now. */
-  active_job: { id: string; state: JobState } | null;
+export interface Conversation {
+  id: string;
+  title: string;
+  /** Set when the conversation is about a vault account. */
+  account_id: string | null;
+  account_status: "active" | "expired" | "deleted" | null;
   can_chat: boolean;
+  messages: ChatMessageItem[];
+  active_job: { id: string; state: JobState } | null;
 }
 
 export interface ChatSummary {
-  account_id: string;
-  domain: string;
+  id: string;
+  title: string;
+  account_id: string | null;
   email: string;
   status: "active" | "expired" | "deleted";
   message_count: number;
@@ -610,15 +624,29 @@ export async function listChats() {
   return request<{ results: ChatSummary[] }>("/api/chats/");
 }
 
+export async function createChat() {
+  return request<Conversation>("/api/chats/", { method: "POST", body: JSON.stringify({}) });
+}
+
+export async function getChat(id: string) {
+  return request<Conversation>(`/api/chats/${id}/`);
+}
+
+export async function sendChat(id: string, message: string) {
+  return request<Conversation>(`/api/chats/${id}/`, { method: "POST", body: JSON.stringify({ message }) });
+}
+
+export async function deleteChat(id: string) {
+  return request<void>(`/api/chats/${id}/`, { method: "DELETE" });
+}
+
+/** The conversation that belongs to one vault account. */
 export async function getAccountChat(accountId: string) {
-  return request<AccountChat>(`/api/accounts/${accountId}/chat/`);
+  return request<Conversation>(`/api/accounts/${accountId}/chat/`);
 }
 
 export async function sendAccountChat(accountId: string, message: string) {
-  return request<AccountChat>(`/api/accounts/${accountId}/chat/`, {
-    method: "POST",
-    body: JSON.stringify({ message }),
-  });
+  return request<Conversation>(`/api/accounts/${accountId}/chat/`, { method: "POST", body: JSON.stringify({ message }) });
 }
 
 export async function clearAccountChat(accountId: string) {

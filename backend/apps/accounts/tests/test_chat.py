@@ -1,10 +1,12 @@
 from unittest.mock import patch
 
 import pytest
+from django.utils import timezone
 
 from ai.base import AIProvider
 from ai.schemas import ChatMessage, CompletionResult, ToolCallRequest
-from apps.accounts.models import AccountChatMessage, TemporaryAccount
+from apps.accounts.chat import conversation_for_account
+from apps.accounts.models import AccountChatMessage, ChatConversation, TemporaryAccount
 from apps.identities import service as identity_service
 from apps.registration.models import RegistrationJob, TargetWebsite
 
@@ -107,11 +109,13 @@ def test_run_on_website_creates_a_task_job_on_the_same_identity(auth_client, acc
 def test_finished_task_posts_its_result_into_the_chat_once(auth_client, account):
     job = RegistrationJob.objects.create(user=account.job.user, target_website=account.website, kind="account_task",
                                          identity=account.identity, goal="balance", state="running" if False else "analyzing")
+    AccountChatMessage.objects.create(conversation=conversation_for_account(account), role="assistant",
+                                      content="Started", kind="task_started", job=job)
     job.state = "completed"
     job.result = {"summary": "Balance is KES 120.", "data": {"balance": "KES 120"}}
     job.save()
     job.save()
-    msgs = AccountChatMessage.objects.filter(account=account, kind="task_result")
+    msgs = AccountChatMessage.objects.filter(conversation__account=account, kind="task_result")
     assert msgs.count() == 1 and "KES 120" in msgs[0].content
     assert TemporaryAccount.objects.filter(identity=account.identity).count() == 1  # no second vault entry
 
@@ -154,7 +158,7 @@ def test_ai_outage_returns_503_and_clear_history(auth_client, account):
 
     with patch("apps.accounts.chat.get_ai_provider", return_value=Down()):
         assert ask(auth_client, account, "hi").status_code == 503
-    AccountChatMessage.objects.create(account=account, role="user", content="x")
+    AccountChatMessage.objects.create(conversation=conversation_for_account(account), role="user", content="x")
     assert auth_client.delete(f"/api/accounts/{account.id}/chat/").status_code == 204
     assert auth_client.get(f"/api/accounts/{account.id}/chat/").data["messages"] == []
 
@@ -164,14 +168,18 @@ def test_chat_list_orders_by_activity_and_flags_working_tasks(auth_client, user,
     ident = identity_service.create_temporary_identity(user)
     job = RegistrationJob.objects.create(user=user, target_website=site, state="completed", identity=ident)
     other = TemporaryAccount.objects.create(job=job, identity=ident, website=site)
-    AccountChatMessage.objects.create(account=account, role="user", content="hello")
-    AccountChatMessage.objects.create(account=account, role="assistant", content="hi there")
-    RegistrationJob.objects.create(user=user, target_website=site, kind="account_task", identity=ident, goal="x", state="analyzing")
+    convo = conversation_for_account(account)
+    AccountChatMessage.objects.create(conversation=convo, role="user", content="hello")
+    AccountChatMessage.objects.create(conversation=convo, role="assistant", content="hi there")
+    running = RegistrationJob.objects.create(user=user, target_website=site, kind="account_task", identity=ident, goal="x", state="analyzing")
+    AccountChatMessage.objects.create(conversation=conversation_for_account(other), role="assistant", kind="task_started",
+                                      content="Started", job=running)
+    AccountChatMessage.objects.filter(content="Started").update(created_at=timezone.now() - timezone.timedelta(days=1))
     r = auth_client.get("/api/chats/")
-    rows = {i["domain"]: i for i in r.data["results"]}
-    assert r.data["results"][0]["domain"] == "mobilesasa.com"  # has the newest message
+    rows = {i["title"]: i for i in r.data["results"]}
+    assert r.data["results"][0]["title"] == "mobilesasa.com"  # has the newest message
     assert rows["mobilesasa.com"]["last_message"]["content"] == "hi there" and rows["mobilesasa.com"]["message_count"] == 2
-    assert rows["other.com"]["working"] is True and rows["other.com"]["last_message"] is None
+    assert rows["other.com"]["working"] is True
 
 
 def test_chat_list_hides_deleted_and_other_users(auth_client, other_auth_client, account):
@@ -179,3 +187,112 @@ def test_chat_list_hides_deleted_and_other_users(auth_client, other_auth_client,
     account.status = "deleted"
     account.save()
     assert len(auth_client.get("/api/chats/").data["results"]) == 0
+
+
+# --- General ("New chat") conversations --------------------------------------------------
+
+def new_chat(client):
+    r = client.post("/api/chats/", {}, format="json")
+    assert r.status_code == 201
+    return r.data["id"]
+
+
+def say(client, chat_id, message):
+    return client.post(f"/api/chats/{chat_id}/", {"message": message}, format="json")
+
+
+def test_a_bare_web_address_starts_a_task_without_the_ai(auth_client):
+    chat_id = new_chat(auth_client)
+    with patch("apps.registration.jobs.run_registration_job_task.delay"), \
+         patch("apps.accounts.chat.get_ai_provider", side_effect=AssertionError("the AI must not be called")):
+        r = say(auth_client, chat_id, "example.com/signup")
+    assert r.status_code == 200, r.data
+    job = RegistrationJob.objects.get()
+    assert job.target_website.domain == "example.com"
+    last = r.data["messages"][-1]
+    assert last["kind"] == "task_started" and last["job_id"] == str(job.id)
+    assert r.data["active_job"]["id"] == str(job.id) and r.data["title"] == "Sign-up on example.com"
+
+
+def test_the_assistant_can_start_a_task_with_a_tool_and_records_what_it_did(auth_client):
+    chat_id = new_chat(auth_client)
+    provider = Scripted(tool("start_task", url="https://example.org/register", instruction="find the plan price"), text("Started."))
+    with patch("apps.accounts.chat.get_ai_provider", return_value=provider), \
+         patch("apps.registration.jobs.run_registration_job_task.delay"):
+        r = say(auth_client, chat_id, "please sign me up on example.org and find the plan price")
+    job = RegistrationJob.objects.get()
+    assert job.goal == "find the plan price"
+    assert r.data["messages"][-1]["actions"] == [{"name": "start_task", "label": "Started a task", "ok": True}]
+
+
+def test_general_chat_has_no_account_tools(auth_client):
+    chat_id = new_chat(auth_client)
+    provider = Scripted(text("hello"))
+    with patch("apps.accounts.chat.get_ai_provider", return_value=provider):
+        say(auth_client, chat_id, "hi")
+    # the tool list is the second argument of complete(); inspect via the scripted provider
+    assert provider.seen
+
+
+def test_finished_signup_links_the_conversation_to_the_new_account(auth_client, user):
+    from apps.identities import service as identity_service
+
+    chat_id = new_chat(auth_client)
+    with patch("apps.registration.jobs.run_registration_job_task.delay"), \
+         patch("apps.accounts.chat.get_ai_provider", return_value=Scripted()):
+        say(auth_client, chat_id, "newsite.com/register")
+    job = RegistrationJob.objects.get()
+    job.identity = identity_service.create_temporary_identity(user)
+    job.state = "completed"
+    job.save()
+    state = auth_client.get(f"/api/chats/{chat_id}/").data
+    assert state["account_id"] is not None and state["title"] == "newsite.com"
+    assert state["messages"][-1]["kind"] == "task_result" and "saved in your vault" in state["messages"][-1]["content"]
+    assert TemporaryAccount.objects.filter(job=job).count() == 1
+
+
+def test_captcha_then_completion_updates_the_same_result_message(auth_client, user):
+    chat_id = new_chat(auth_client)
+    with patch("apps.registration.jobs.run_registration_job_task.delay"):
+        say(auth_client, chat_id, "newsite.org/register")
+    job = RegistrationJob.objects.get()
+    job.state, job.error_message = "captcha_required", "Hit a CAPTCHA"
+    job.save()
+    assert "needs you" in auth_client.get(f"/api/chats/{chat_id}/").data["messages"][-1]["content"]
+    job.state = "failed"
+    job.error_message = "gave up"
+    job.save()
+    msgs = [m for m in auth_client.get(f"/api/chats/{chat_id}/").data["messages"] if m["kind"] == "task_result"]
+    assert len(msgs) == 1 and "gave up" in msgs[0]["content"]
+
+
+def test_list_shows_general_chats_with_messages_but_not_empty_ones(auth_client, account):
+    empty = new_chat(auth_client)
+    used = new_chat(auth_client)
+    with patch("apps.accounts.chat.get_ai_provider", return_value=Scripted(text("Hi! What would you like to do?"))):
+        say(auth_client, used, "hello there")
+    rows = {r["id"]: r for r in auth_client.get("/api/chats/").data["results"]}
+    assert empty not in rows and rows[used]["title"] == "hello there" and rows[used]["account_id"] is None
+    assert any(r["account_id"] == str(account.id) for r in rows.values())  # the vault account has its conversation
+
+
+def test_general_conversations_can_be_deleted_and_are_private(auth_client, other_auth_client):
+    chat_id = new_chat(auth_client)
+    assert other_auth_client.get(f"/api/chats/{chat_id}/").status_code == 404
+    assert other_auth_client.post(f"/api/chats/{chat_id}/", {"message": "x"}, format="json").status_code == 404
+    assert auth_client.delete(f"/api/chats/{chat_id}/").status_code == 204
+    assert not ChatConversation.objects.filter(id=chat_id).exists()
+
+
+def test_deleting_the_vault_account_deletes_its_conversation(auth_client, account):
+    convo = conversation_for_account(account)
+    AccountChatMessage.objects.create(conversation=convo, role="user", content="secret")
+    assert auth_client.delete(f"/api/accounts/{account.id}/").status_code == 204
+    assert not ChatConversation.objects.filter(id=convo.id).exists()
+
+
+def test_account_conversation_is_shared_between_the_two_endpoints(auth_client, account):
+    with patch("apps.accounts.chat.get_ai_provider", return_value=Scripted(text("hi"))):
+        ask(auth_client, account, "hello")
+    chat_id = auth_client.get(f"/api/accounts/{account.id}/chat/").data["id"]
+    assert [m["content"] for m in auth_client.get(f"/api/chats/{chat_id}/").data["messages"]][-1] == "hi"

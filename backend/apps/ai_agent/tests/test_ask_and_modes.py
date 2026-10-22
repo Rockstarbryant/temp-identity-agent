@@ -374,3 +374,16 @@ class TestLoopIntegration:
         tool_msg = [m for m in provider.seen_messages[1] if m.role == "tool"][0]
         assert json.loads(tool_msg.content)["result"]["answer"] == "Nairobi"
         assert ProfileEntry.objects.get(user=user, key="county").get_value() == "Nairobi"
+
+
+@pytest.mark.django_db
+class TestAccountTaskNeverFailedByAuthCheck:
+    def test_report_auth_methods_is_harmless_on_account_task(self, user, site):
+        from apps.ai_agent.agent_loop import _account_history
+        from apps.identities.models import TemporaryIdentity  # noqa: F401
+        job = RegistrationJob.objects.create(user=user, target_website=site, kind="account_task", goal="x")
+        from apps.ai_agent.tools import AgentContext, _handle_site_report_auth_methods, AuthMethodsArgs
+        out = _handle_site_report_auth_methods(AgentContext(job=job, session=None, provider=""), AuthMethodsArgs(email_password=False, methods=["google"]))
+        job.refresh_from_db()
+        assert out["proceed"] is True and job.state != "failed"
+        assert _account_history(job) == ""

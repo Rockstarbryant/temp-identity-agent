@@ -276,6 +276,10 @@ def _handle_user_ask(ctx: AgentContext, args: UserAskArgs) -> dict:
 
 
 def _handle_site_report_auth_methods(ctx: AgentContext, args: AuthMethodsArgs) -> dict:
+    if ctx.job.kind != RegistrationJob.Kind.REGISTRATION:
+        # Only meaningful before sign-up. Accounts that already exist, and forms, must never be failed by it.
+        return {"proceed": True, "note": "Not needed for this job: the account already exists. Sign in with identity.get "
+                "(look for a Log in / Sign in button or a sign-in dialog, which may be on the home page) and continue."}
     ctx.job.auth_check = {"email_password": args.email_password, "methods": args.methods[:10], "notes": args.notes}
     if args.email_password:
         ctx.job.save(update_fields=["auth_check", "updated_at"])

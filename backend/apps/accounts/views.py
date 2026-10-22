@@ -57,6 +57,7 @@ class TemporaryAccountDetailView(generics.RetrieveDestroyAPIView):
         from apps.email_service.models import EmailMessage
 
         EmailMessage.objects.filter(mailbox__identity=identity).delete()  # the inbox is erased too
+        account.conversations.all().delete()  # and so is the chat history
 
         AuditLog.objects.create(
             user=self.request.user, action="account.deleted", resource_type="TemporaryAccount",

@@ -4,19 +4,27 @@ import Link from "next/link";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Mail, Trash2 } from "lucide-react";
-import { ApiError, deleteAccount, getAccount } from "@/lib/api";
+import { ApiError, clearAccountChat, deleteAccount, getAccount, getAccountChat, sendAccountChat } from "@/lib/api";
 import { invalidate } from "@/lib/cache";
 import { useCachedData } from "@/lib/useCachedData";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import { describeExpiry, formatDateTime } from "@/lib/format";
 import MailboxPanel from "@/components/MailboxPanel";
-import AccountChat from "@/components/vault/AccountChat";
+import Conversation, { ConversationApi } from "@/components/chat/Conversation";
 import CredentialsPanel from "@/components/vault/CredentialsPanel";
 import { AccountStatusBadge, AccountTypeBadges } from "@/components/vault/AccountBadges";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Card";
 import { EmptyState, ErrorState, InlineMessage, PageSpinner } from "@/components/ui/States";
 import { useConfirm, useToast } from "@/components/ui/Feedback";
+
+function chatApi(accountId: string): ConversationApi {
+  return {
+    load: () => getAccountChat(accountId),
+    send: (m) => sendAccountChat(accountId, m),
+    clear: () => clearAccountChat(accountId),
+  };
+}
 
 export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -114,7 +122,7 @@ export default function AccountDetailPage() {
               description="Ask about this account, check its mail, change saved details, or have the agent do something on the site."
               actions={<Link href={`/chat?account=${account.id}`} className={buttonClass("ghost", "sm")}>Open full chat</Link>}
             >
-              <AccountChat accountId={account.id} domain={account.domain} />
+              <Conversation api={chatApi(account.id)} resetKey={account.id} domain={account.domain} />
             </Panel>
           )}
 

@@ -67,6 +67,34 @@ def compress_old_snapshots(messages: list[ChatMessage]) -> None:
             continue
 
 
+def _account_history(job: RegistrationJob) -> str:
+    """What is already known about this account, so a new task doesn't start from nothing."""
+    if job.identity_id is None:
+        return ""
+    lines = [
+        "\n\nBackground (the account already exists; do NOT sign up again and do NOT call site.report_auth_methods):",
+        f"- Registered with email {job.identity.email} and username {job.identity.username}. "
+        "Use identity.get for the password.",
+    ]
+    site = job.target_website
+    if site.registration_url:
+        lines.append(f"- Sign-up page was {site.registration_url}. The sign-in button may be on the home page or in a dialog.")
+    earlier = (RegistrationJob.objects.filter(identity=job.identity, state=RegistrationJob.State.COMPLETED)
+               .exclude(id=job.id).order_by("-created_at")[:3])
+    for e in earlier:
+        res = e.result if isinstance(e.result, dict) else {}
+        summary = str(res.get("summary") or "")[:300]
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
+        urls = [str(v) for v in data.values() if isinstance(v, str) and v.startswith("http")][:2]
+        if e.kind == RegistrationJob.Kind.REGISTRATION:
+            lines.append("- The sign-up finished and the agent was signed in" + (f" ({summary})" if summary else "") + ".")
+        elif summary:
+            lines.append(f"- Earlier task '{(e.goal or '')[:80]}': {summary}")
+        if urls:
+            lines.append("  Signed-in pages seen: " + ", ".join(urls))
+    return "\n".join(lines)
+
+
 class AgentRunner:
     """Runs one RegistrationJob's agent loop to completion or a stopping state."""
 
@@ -88,6 +116,7 @@ class AgentRunner:
         elif self.job.kind == RegistrationJob.Kind.ACCOUNT_TASK and not resume:
             instruction = (
                 f"Sign in to the existing account on {target_url} and do this task: {self.job.goal}"
+                + _account_history(self.job)
             )
         elif resume:
             instruction = (

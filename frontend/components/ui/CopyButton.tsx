@@ -10,8 +10,8 @@ import { cn } from "./cn";
  * `label` names what is copied ("password", "verification code") for screen readers.
  */
 export default function CopyButton({
-  value, label, className, withText = false,
-}: { value: string; label: string; className?: string; withText?: boolean }) {
+  value, label, className, withText = false, textLabel = "Copy",
+}: { value: string; label: string; className?: string; withText?: boolean; textLabel?: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast = useToast();
@@ -43,7 +43,7 @@ export default function CopyButton({
       )}
     >
       {copied ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-      {withText && <span>{copied ? "Copied" : "Copy"}</span>}
+      {withText && <span>{copied ? "Copied" : textLabel}</span>}
       <span role="status" className="sr-only">{copied ? `${label} copied` : ""}</span>
     </button>
   );
