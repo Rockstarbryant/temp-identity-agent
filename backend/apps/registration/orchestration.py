@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from apps.ai_agent.agent_loop import AgentRunner
 from apps.audit.models import AuditLog
-from apps.common.db import ensure_db_connection
+from apps.common.db import ensure_db_connection, retry_db
 from apps.common.exceptions import (
     DomainBlockedError,
     RateLimitedError,
@@ -26,6 +26,15 @@ from apps.registration.models import DomainPolicy, RegistrationJob
 logger = logging.getLogger("apps.registration")
 
 
+def _friendly_error(exc: Exception) -> str:
+    text = str(exc)
+    if "free-models-per-day" in text or "429" in text:
+        return "The AI service is out of free requests for today and the backup service did not answer. Try again later."
+    if "timed out" in text:
+        return "The AI service took too long to answer. Please try again."
+    return f"Unexpected error: {text[:300]}"
+
+
 def _fail(job: RegistrationJob, code: str, message: str) -> RegistrationJob:
     job.state = RegistrationJob.State.FAILED
     job.error_code = code
@@ -33,6 +42,19 @@ def _fail(job: RegistrationJob, code: str, message: str) -> RegistrationJob:
     job.completed_at = timezone.now()
     job.save(update_fields=["state", "error_code", "error_message", "completed_at", "updated_at"])
     return job
+
+
+def _fail_unless_finished(job: RegistrationJob, code: str, message: str) -> None:
+    """Mark the job failed after an error, unless it already reached a stopping state.
+    Survives the database being unreachable for a few seconds, so a job is never left 'Starting'."""
+
+    def write():
+        ensure_db_connection()
+        job.refresh_from_db()
+        if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
+            _fail(job, code, message)
+
+    retry_db(write)
 
 
 def check_domain_policy(job: RegistrationJob) -> None:
@@ -118,19 +140,12 @@ def start_registration_job(job_id) -> RegistrationJob:
         else:
             AgentRunner(job).run(job.target_url or job.target_website.registration_url, resume=False)
     except TempIdentityAgentError as exc:
-        ensure_db_connection()
-        job.refresh_from_db()
-        if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
-            _fail(job, exc.code, exc.message)
+        _fail_unless_finished(job, exc.code, exc.message)
     except Exception as exc:  # noqa: BLE001 — never let an unexpected error leave a job stuck
         logger.exception("Unhandled error running job %s", job.id)
-        ensure_db_connection()
-        job.refresh_from_db()
-        if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
-            _fail(job, "AI_ERROR", f"Unexpected error: {exc}")
+        _fail_unless_finished(job, "AI_ERROR", _friendly_error(exc))
 
-    ensure_db_connection()
-    job.refresh_from_db()
+    retry_db(lambda: (ensure_db_connection(), job.refresh_from_db()))
     AuditLog.objects.create(
         user=job.user, action="job.finished", resource_type="RegistrationJob",
         resource_id=str(job.id), metadata={"final_state": job.state},
@@ -156,19 +171,12 @@ def resume_registration_job(job_id) -> RegistrationJob:
     try:
         AgentRunner(job).run(job.target_url or job.target_website.registration_url, resume=True)
     except TempIdentityAgentError as exc:
-        ensure_db_connection()
-        job.refresh_from_db()
-        if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
-            _fail(job, exc.code, exc.message)
+        _fail_unless_finished(job, exc.code, exc.message)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error resuming job %s", job.id)
-        ensure_db_connection()
-        job.refresh_from_db()
-        if job.state not in RegistrationJob.TERMINAL_STATES | RegistrationJob.RESUMABLE_STATES:
-            _fail(job, "AI_ERROR", f"Unexpected error: {exc}")
+        _fail_unless_finished(job, "AI_ERROR", _friendly_error(exc))
 
-    ensure_db_connection()
-    job.refresh_from_db()
+    retry_db(lambda: (ensure_db_connection(), job.refresh_from_db()))
     return job
 
 

@@ -405,7 +405,8 @@ class TestFallbackProvider:
         provider = FallbackAIProvider()
         with patch("httpx.Client") as MockClient:
             instance = MockClient.return_value.__enter__.return_value
-            instance.post.side_effect = [httpx.ConnectTimeout("timed out"), httpx.Response(200, json=_ok_body())]
+            # one quiet retry on the same provider, then the fallback answers
+            instance.post.side_effect = [httpx.ConnectTimeout("timed out"), httpx.ConnectTimeout("timed out"), httpx.Response(200, json=_ok_body())]
             result = provider.complete([ChatMessage(role="user", content="hi")], build_tool_definitions())
         assert result.provider == "groq"
 

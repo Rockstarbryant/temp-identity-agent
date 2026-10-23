@@ -227,11 +227,16 @@ class OpenAICompatibleProvider(AIProvider):
     ) -> CompletionResult:
         payload = self._to_provider_request(messages, tools)
         resp = None
+        timed_out = False
         for attempt in range(1, self.TOOL_USE_FAILED_ATTEMPTS + 1):
             try:
                 with httpx.Client(base_url=self.base_url, timeout=self.timeout) as client:
                     resp = client.post("/chat/completions", json=payload, headers=self._headers())
             except httpx.HTTPError as exc:
+                # A slow or dropped connection: one more try before giving up.
+                if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)) and not timed_out and attempt < self.TOOL_USE_FAILED_ATTEMPTS:
+                    timed_out = True
+                    continue
                 raise AIProviderError(
                     f"{self.label} request failed: {exc}", retryable=True
                 ) from exc

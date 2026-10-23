@@ -18,6 +18,7 @@ warning); if GROQ_API_KEY is not set, OpenRouter errors are raised
 without a fallback.
 """
 import logging
+import time
 
 from ai.base import AIProvider, AIProviderError
 from ai.providers.groq import GroqProvider
@@ -25,6 +26,12 @@ from ai.providers.openrouter import OpenRouterProvider
 from ai.schemas import ChatMessage, CompletionResult, ToolDefinition
 
 logger = logging.getLogger("apps.ai")
+
+
+# When the primary says its free quota for the whole day is gone, there is no point asking it
+# again for every step of every job. Skip it for this long and go straight to the fallback.
+_PRIMARY_SKIP_SECONDS = 3600
+_primary_skip_until = 0.0
 
 
 class FallbackAIProvider(AIProvider):
@@ -72,11 +79,20 @@ class FallbackAIProvider(AIProvider):
             self._mark(self.fallback)
             return result
 
+        global _primary_skip_until
+        if self.fallback is not None and time.monotonic() < _primary_skip_until:
+            result = self.fallback.complete(messages, tools)
+            self._mark(self.fallback)
+            return result
+
         try:
             result = self.primary.complete(messages, tools)
             self._mark(self.primary)
             return result
         except AIProviderError as primary_exc:
+            if "free-models-per-day" in str(primary_exc):
+                _primary_skip_until = time.monotonic() + _PRIMARY_SKIP_SECONDS
+                logger.warning("Primary AI provider is out of daily free requests; using the fallback for the next hour.")
             if self.fallback is None or not primary_exc.retryable:
                 raise
 

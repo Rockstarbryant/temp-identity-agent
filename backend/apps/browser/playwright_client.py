@@ -89,7 +89,14 @@ class ManagedBrowserSession:
                     BrowserSession.Status.CRASHED if exc_type else BrowserSession.Status.CLOSED
                 )
                 self.db_session.ended_at = timezone.now()
-                self.db_session.save(update_fields=["status", "ended_at", "updated_at"])
+                try:
+                    from apps.common.db import retry_db
+
+                    retry_db(lambda: self.db_session.save(update_fields=["status", "ended_at", "updated_at"]))
+                except Exception:  # noqa: BLE001 — never hide the job's real error behind a bookkeeping failure
+                    import logging
+
+                    logging.getLogger("apps.browser").warning("Could not record browser session end", exc_info=True)
         # Don't suppress exceptions — let the caller's error handling see them.
         return False
 

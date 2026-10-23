@@ -100,3 +100,40 @@ def close_orphaned_browser_sessions():
         status=BrowserSession.Status.OPEN, updated_at__lt=cutoff
     ).update(status=BrowserSession.Status.CRASHED, ended_at=timezone.now())
     return count
+
+
+@shared_task
+def fail_stalled_registration_jobs():
+    """
+    A job that is 'running' but has shown no sign of life (no new step, no state change) for
+    longer than its time budget lost its worker (restart, network drop, crash). Mark it failed
+    so the person sees an answer and can retry, instead of 'Starting' forever.
+    Jobs waiting on a person (a question, CAPTCHA) are left alone.
+    """
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.db.models import Max
+
+    from apps.registration.models import RegistrationJob
+
+    S = RegistrationJob.State
+    running = [S.STARTING, S.OPENING_SITE, S.ANALYZING, S.IDENTITY_CREATED, S.FILLING_FORM,
+               S.SUBMITTING, S.WAITING_FOR_EMAIL, S.VERIFYING]
+    cutoff = timezone.now() - timedelta(seconds=settings.MAX_JOB_DURATION_SECONDS + 180)
+    count = 0
+    candidates = (RegistrationJob.objects.filter(state__in=running, updated_at__lt=cutoff)
+                  .annotate(last_step=Max("steps__created_at")))
+    for job in candidates:
+        if job.last_step and job.last_step >= cutoff:
+            continue
+        job.state = S.FAILED
+        job.error_code = "WORKER_LOST"
+        job.error_message = ("The task stopped before it finished (the worker lost its connection). "
+                             "Nothing was lost. Press Try again.")
+        job.completed_at = timezone.now()
+        job.save(update_fields=["state", "error_code", "error_message", "completed_at", "updated_at"])
+        count += 1
+    if count:
+        logger.warning("fail_stalled_registration_jobs: failed %d stalled jobs", count)
+    return count

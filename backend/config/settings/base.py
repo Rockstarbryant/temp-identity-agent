@@ -225,6 +225,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.identities.tasks.expire_stale_registration_jobs",
         "schedule": 1800.0,  # every 30 minutes
     },
+    "fail-stalled-registration-jobs": {
+        "task": "apps.identities.tasks.fail_stalled_registration_jobs",
+        "schedule": 120.0,
+    },
     "poll-mailboxes": {
         "task": "apps.email_service.tasks.poll_mailboxes",
         "schedule": 60.0,  # new mail -> notification
