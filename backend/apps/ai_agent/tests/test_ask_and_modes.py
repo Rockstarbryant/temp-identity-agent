@@ -387,3 +387,31 @@ class TestAccountTaskNeverFailedByAuthCheck:
         job.refresh_from_db()
         assert out["proceed"] is True and job.state != "failed"
         assert _account_history(job) == ""
+
+
+@pytest.mark.django_db
+class TestSmsCodeQuestions:
+    def test_prompt_treats_sms_codes_as_questions_not_captcha(self, user, site):
+        p = build_system_prompt(make_job(user, site))
+        assert "sms_code" in p and "NOT a CAPTCHA" in p
+        assert "SMS verification" not in p
+
+    def test_one_time_codes_are_never_looked_up_or_saved(self, user, site, monkeypatch, settings):
+        settings.HUMAN_ASSIST_TIMEOUT_SECONDS = 60
+        from apps.ai_agent import questions
+        from apps.profiles.models import ProfileEntry
+        from apps.profiles import standard_fields as sf
+
+        assert sf.is_one_time_key("sms_code") and sf.is_one_time_key("otp") and not sf.is_one_time_key("postal_code")
+        ProfileEntry.save_value(user, "sms_code", "111111", label="old", source="answer")  # even if one slipped in
+        job = make_job(user, site)
+
+        # asking never returns the saved (stale) code: it goes to the user, as a sensitive question
+        monkeypatch.setattr(questions.time, "sleep", lambda s: (_ for _ in ()).throw(RuntimeError("waiting")))
+        with pytest.raises(RuntimeError, match="waiting"):
+            questions.ask_user(job, "Enter the code", key="sms_code")
+        q = questions.AgentQuestion.objects.get(job=job, key="sms_code")
+        assert q.sensitive is True
+
+        questions.record_answer(q, "482913", remember=True)
+        assert ProfileEntry.objects.get(user=user, key="sms_code").get_value() == "111111"  # not overwritten

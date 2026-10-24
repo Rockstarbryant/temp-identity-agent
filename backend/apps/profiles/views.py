@@ -71,7 +71,7 @@ class ProfileEntryView(APIView):
 
     def put(self, request, key):
         key = sf.normalize_key(key)
-        if not key or sf.is_blocked_key(key):
+        if not key or sf.is_unsavable_key(key):
             return Response({"detail": "That detail can't be saved here (passwords and similar secrets are never stored)."},
                             status=status.HTTP_400_BAD_REQUEST)
         value = str(request.data.get("value", "")).strip()

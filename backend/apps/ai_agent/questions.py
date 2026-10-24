@@ -33,7 +33,10 @@ def ask_user(job: RegistrationJob, question: str, key: str = "", options: list[s
     if key and sf.is_blocked_key(key):
         return {"answered": False, "reason": "Passwords and similar secrets are never requested from the user."}
 
-    saved = lookup_saved(job.user, key)
+    one_time = bool(key) and sf.is_one_time_key(key)
+    if one_time:
+        sensitive = True  # a verification code is shown to nobody but the page it is typed into
+    saved = None if one_time else lookup_saved(job.user, key)
     if saved is not None:
         return {"answered": True, "answer": saved, "source": "saved"}
 
@@ -82,7 +85,7 @@ def record_answer(question: AgentQuestion, answer: str | None, remember: bool) -
     question.status = AgentQuestion.Status.ANSWERED
     question.answered_at = timezone.now()
     question.save(update_fields=["encrypted_answer", "status", "answered_at", "updated_at"])
-    if remember and question.key and not sf.is_blocked_key(question.key):
+    if remember and question.key and not sf.is_unsavable_key(question.key):
         ProfileEntry.save_value(
             question.job.user, question.key, answer.strip(), label=question.question[:150], source="answer"
         )

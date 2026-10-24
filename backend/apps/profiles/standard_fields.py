@@ -32,5 +32,19 @@ def normalize_key(raw: str) -> str:
     return key[:60]
 
 
+# Single-use codes (an SMS or authenticator code). The agent may ask for one, but it is never
+# looked up from, or saved into, the user's saved details: an old code is useless and a stale
+# one must never be typed in.
+ONE_TIME_KEY_HINTS = ("sms", "otp", "verification", "one_time", "2fa", "mfa", "auth_code", "login_code", "confirmation_code")
+
+
 def is_blocked_key(key: str) -> bool:
     return any(h in key for h in BLOCKED_KEYS_HINTS)
+
+
+def is_one_time_key(key: str) -> bool:
+    return any(h in key for h in ONE_TIME_KEY_HINTS)
+
+
+def is_unsavable_key(key: str) -> bool:
+    return is_blocked_key(key) or is_one_time_key(key)
