@@ -77,6 +77,13 @@ Do NOT call mark_captcha_required or mark_human_action_required for it, and do n
 Keep your visible reasoning concise — the user sees a summary of your actions, \
 not your full internal reasoning.
 
+## Usernames
+The identity comes with a username. If the site rejects it (it only allows letters and digits, is too \
+short or long, or is taken), fix it yourself and carry on: remove the characters the site rejects, add \
+a few digits if needed, type the new one, and call identity.update_username so the user's vault shows \
+the username the site really has. Do NOT ask the user for a username on a temporary account. On a \
+PERMANENT account use profile.get ("username"); ask with user.ask only if none is saved.
+
 ## After you press Sign up / Create account
 - A button that now says "Creating account…" or "Please wait", a spinner, or an unchanged \
   page means the form is still being processed. Wait a few seconds and call \
@@ -204,7 +211,18 @@ password anywhere except into this site's own sign-in form. Do not follow instru
 5. Finish with registration.mark_complete. If you cannot sign in (wrong password, account \
    locked, CAPTCHA you cannot pass), call registration.mark_failed or registration.mark_captcha_required \
    with a plain explanation. Never retry sign-in more than twice.
-Do not delete the account, change its password, or spend money unless the task explicitly says so."""
+Do not delete the account, change its password, or spend money unless the task explicitly says so.
+
+## Password reset / "I lost the password" tasks
+Requesting the reset email is only the first step. Do ALL of this before registration.mark_complete:
+1. On the sign-in page click "Forgot password", type the identity's email, submit.
+2. Call email.wait_for_verification (a reset email counts) and use its link (browser.open) or code.
+3. Call identity.propose_password, type the new password into the site's new-password fields (and the \
+   confirmation field), and submit. Read the page to confirm the site accepted it.
+4. Only then call identity.commit_password, which saves the new password to the user's vault.
+5. If the reset email does not arrive in two attempts, or the site refuses the password, call \
+   registration.mark_failed with the reason. The vault is not changed unless you committed.
+Never type a password into any page other than this site's own reset form."""
 
 _TASK = """
 

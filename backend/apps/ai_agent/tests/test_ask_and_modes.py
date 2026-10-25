@@ -11,7 +11,7 @@ from apps.ai_agent.context import AgentContext
 from apps.ai_agent.dispatcher import dispatch_tool_call
 from apps.ai_agent.step_detail import describe_step, redact_for_storage
 from apps.profiles.models import EmailConnection, ProfileEntry
-from apps.registration.models import AgentQuestion, RegistrationJob, TargetWebsite
+from apps.registration.models import AgentQuestion, RegistrationJob, RegistrationStep, TargetWebsite
 
 pytestmark = pytest.mark.django_db
 
@@ -415,3 +415,78 @@ class TestSmsCodeQuestions:
 
         questions.record_answer(q, "482913", remember=True)
         assert ProfileEntry.objects.get(user=user, key="sms_code").get_value() == "111111"  # not overwritten
+
+
+@pytest.mark.django_db
+class TestUsernamesAndPasswordReset:
+    def _ctx(self, user, site, **kw):
+        from apps.ai_agent.context import AgentContext
+        from apps.identities.service import create_temporary_identity
+
+        ident = create_temporary_identity(user)
+        job = make_job(user, site, **kw)
+        job.identity = ident
+        job.save(update_fields=["identity"])
+        return AgentContext(job=job, session=None, provider="", identity=ident)
+
+    def test_generated_usernames_have_no_dots(self, user):
+        from apps.identities.service import create_temporary_identity
+        assert all(create_temporary_identity(user).username.isalnum() for _ in range(20))
+
+    def test_agent_fixes_a_rejected_username_itself_and_the_vault_follows(self, user, site):
+        ctx = self._ctx(user, site)
+        out = call(ctx, "identity.update_username", username="rockstarbryant42")
+        assert out["success"] and ctx.identity.username == "rockstarbryant42"
+        ctx.identity.refresh_from_db()
+        assert ctx.identity.username == "rockstarbryant42"
+        assert "letters" in call(ctx, "identity.update_username", username="bad name!")["error"]
+
+    def test_temporary_account_never_asks_the_user_for_a_username(self, user, site, settings):
+        settings.HUMAN_ASSIST_TIMEOUT_SECONDS = 30
+        ctx = self._ctx(user, site, account_mode="temporary")
+        out = call(ctx, "user.ask", question="Which username should I use?", field_key="username")
+        assert "Do not ask the user for a username" in out["error"]
+        assert not AgentQuestion.objects.exists()
+
+    def test_permanent_account_uses_saved_username_and_updates_vault_from_answer(self, user, site, settings):
+        settings.HUMAN_ASSIST_TIMEOUT_SECONDS = 30
+        ctx = self._ctx(user, site, account_mode="permanent")
+        ProfileEntry.save_value(user, "username", "mysavedname")
+        out = call(ctx, "user.ask", question="Username?", field_key="username")
+        assert out["result"]["answer"] == "mysavedname" and ctx.identity.username == "mysavedname"
+        ProfileEntry.objects.filter(user=user, key="username").delete()
+
+        def answer(_):
+            questions.record_answer(AgentQuestion.objects.get(), "chosen99", remember=False)
+
+        with patch("apps.ai_agent.questions.time.sleep", side_effect=answer):
+            out = call(ctx, "user.ask", question="Username?", field_key="username")
+        assert out["result"]["answer"] == "chosen99" and ctx.identity.username == "chosen99"
+
+    def test_username_typed_into_the_form_is_synced_at_completion(self, user, site):
+        ctx = self._ctx(user, site)
+        RegistrationStep.objects.create(job=ctx.job, step_index=0, action="browser.type", tool_name="browser.type",
+                                        tool_input={"element_id": "e", "text": "winner2026"}, detail="Filled “Username:” with winner2026")
+        out = call(ctx, "registration.mark_complete")
+        assert out["success"]
+        ctx.identity.refresh_from_db()
+        assert ctx.identity.username == "winner2026"
+
+    def test_password_reset_changes_the_vault_only_after_commit(self, user, site):
+        ctx = self._ctx(user, site, kind="account_task")
+        old = ctx.identity.get_password()
+        new = call(ctx, "identity.propose_password")["result"]["new_password"]
+        ctx.identity.refresh_from_db()
+        assert ctx.identity.get_password() == old and new != old  # proposing changes nothing
+        assert "did not save it" in call(ctx, "registration.mark_complete")["error"]
+        assert call(ctx, "identity.commit_password")["success"]
+        ctx.identity.refresh_from_db()
+        assert ctx.identity.get_password() == new
+        assert call(ctx, "registration.mark_complete")["success"]
+
+    def test_proposed_password_is_never_stored_in_the_timeline(self, user, site):
+        from apps.ai_agent.step_detail import redact_for_storage
+
+        _, out = redact_for_storage("identity.propose_password", {}, None, {"success": True, "result": {"new_password": "S3cret!"}})
+        assert "S3cret" not in str(out)
+        assert "no proposed password" in call(self._ctx(user, site, kind="account_task"), "identity.commit_password")["error"]

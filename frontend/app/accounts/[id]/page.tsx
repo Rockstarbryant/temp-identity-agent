@@ -128,7 +128,7 @@ export default function AccountDetailPage() {
 
           <Panel
             title="Mailbox"
-            description="Verification emails for this account."
+            description={account.permanent ? "Mail from your connected inbox. All your permanent accounts share it." : "Verification emails for this account."}
             actions={
               <Link href={`/mailboxes?account=${account.id}`} className={buttonClass("ghost", "sm")}>
                 <Mail className="h-4 w-4" aria-hidden="true" /> Open in Mailboxes

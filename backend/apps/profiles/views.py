@@ -100,6 +100,7 @@ def _connection_dict(conn: EmailConnection | None) -> dict:
         "imap_host": conn.imap_host if conn else None,
         "last_checked_at": conn.last_checked_at if conn else None,
         "last_error": conn.last_error if conn else "",
+        "muted": bool(conn and conn.muted),
         "gmail_oauth_available": bool(settings.GOOGLE_OAUTH_CLIENT_ID and settings.GOOGLE_OAUTH_CLIENT_SECRET
                                       and settings.GOOGLE_OAUTH_REDIRECT_URI),
     }
@@ -109,6 +110,7 @@ class EmailConnectionView(APIView):
     """
     GET    /api/email-connection/ — current connection (never includes the secret)
     PUT    /api/email-connection/ — IMAP: {address, password, host?}; logs in once to verify, then saves
+    PATCH  /api/email-connection/ — {"muted": true|false}: stop/resume background checks and notifications
     DELETE /api/email-connection/ — disconnect and erase the stored secret
     """
 
@@ -150,6 +152,17 @@ class EmailConnectionView(APIView):
         conn.save()
         AuditLog.objects.create(user=request.user, action="email.connected", resource_type="EmailConnection",
                                 resource_id=str(conn.id), metadata={"kind": "imap", "host": host})
+        return Response(_connection_dict(conn))
+
+    def patch(self, request):
+        conn = EmailConnection.objects.filter(user=request.user).first()
+        if conn is None:
+            return Response({"detail": "No email connected."}, status=status.HTTP_404_NOT_FOUND)
+        if "muted" in request.data:
+            conn.muted = request.data.get("muted") in (True, "true", "True", 1, "1")
+            conn.save(update_fields=["muted", "updated_at"])
+            AuditLog.objects.create(user=request.user, action="email.muted" if conn.muted else "email.unmuted",
+                                    resource_type="EmailConnection", resource_id=str(conn.id))
         return Response(_connection_dict(conn))
 
     def delete(self, request):

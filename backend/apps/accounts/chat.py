@@ -66,7 +66,11 @@ task for it and say that the saved details were updated only after you've done b
 - Do something on the website with run_on_website: it signs in with this account in a real browser and carries \
 out an instruction (read a page, find information, change a setting). It takes a minute or more and runs in the \
 background; tell the user it started and that progress and the result will appear in this chat. Never start one the \
-user did not ask for. Never ask it to delete the account, spend money, or change the password unless the user said so.
+user did not ask for. Never ask it to delete the account or spend money unless the user said so.
+- If the user lost the password or wants a new one ("click forgot password and give me a new one"), use \
+run_on_website with the instruction: "Reset the password: use Forgot password with this account's email, read the \
+reset email from the account's mailbox, open the link, set a new password and save it to the vault." Never invent \
+a password and never put one into update_saved_details unless the user wrote that exact password in their message.
 - Start a task on a DIFFERENT website with start_task (for example "sign me up on example.com").
 
 """ + _COMMON_RULES
@@ -176,6 +180,18 @@ def normalize_url(text: str) -> str | None:
     return raw
 
 
+_PLACEHOLDERS = {"", "null", "none", "nil", "undefined", "n/a", "na", "unchanged", "same", "current", "-", "false"}
+
+
+def _real_value(value, user_text: str) -> str:
+    """A value the user actually typed in this message. Models fill optional arguments with placeholders such as
+    "null"; one of those must never overwrite a saved username or password."""
+    v = str(value or "").strip()
+    if v.lower() in _PLACEHOLDERS or v not in user_text:
+        return ""
+    return v
+
+
 class _Turn:
     """Tool implementations for one user message."""
 
@@ -183,6 +199,7 @@ class _Turn:
         self.convo, self.account, self.user, self.ip = convo, convo.account, user, ip
         self.job = None
         self.secret_to_scrub = ""
+        self.user_text = ""
         self.actions: list[dict] = []
 
     # -- account tools
@@ -219,8 +236,8 @@ class _Turn:
             return {"error": "This account is no longer active."}
         identity = self.account.identity
         changed = []
-        username = (args.get("username") or "").strip()[:150]
-        password = (args.get("password") or "")[:200]
+        username = _real_value(args.get("username"), self.user_text)[:150]
+        password = _real_value(args.get("password"), self.user_text)[:200]
         if username and username != identity.username:
             identity.username = username
             changed.append("username")
@@ -312,6 +329,7 @@ def send(convo: ChatConversation, user, text: str, ip: str | None = None) -> lis
     """Handle one user message. Returns the new messages (the user's, then the reply)."""
     text = text.strip()[:2000]
     turn = _Turn(convo, user, ip)
+    turn.user_text = text
 
     # A message that is only a web address starts a task straight away, like the New task page.
     url = None if convo.account_id else normalize_url(text)

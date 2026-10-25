@@ -79,6 +79,9 @@ class EmailConnection(UUIDTimeStampedModel):
     encrypted_secret = models.TextField()
     last_checked_at = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=300, blank=True)
+    # Muted: no background checking and no "new email" notifications for this inbox. The agent still
+    # reads it while a task is running, and "Check now" still works.
+    muted = models.BooleanField(default=False)
 
     def set_secret(self, plaintext: str) -> None:
         self.encrypted_secret = encrypt_secret(plaintext)

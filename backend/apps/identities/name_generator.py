@@ -30,11 +30,11 @@ def generate_display_name() -> str:
 
 def generate_username(max_suffix_digits: int = 4) -> str:
     """
-    A lowercase username: first name + last name + a few random digits,
-    e.g. 'jordan.mercer4821'. Digit count is configurable so callers can
+    A lowercase, letters-and-digits username: first name + last name + a few random digits,
+    e.g. 'jordanmercer4821'. (No dots or dashes: many sites reject them.) Digit count is configurable so callers can
     tune collision probability for high-volume usage.
     """
     first = secrets.choice(FIRST_NAMES).lower()
     last = secrets.choice(LAST_NAMES).lower()
     suffix = "".join(str(secrets.randbelow(10)) for _ in range(max_suffix_digits))
-    return f"{first}.{last}{suffix}"
+    return f"{first}{last}{suffix}"

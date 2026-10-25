@@ -17,3 +17,4 @@ class AgentContext:
     provider: str = ""            # "google" | "microsoft" | "" for the page being worked on
     signed_in: bool = False       # a verified sign-in happened in this browser -> session can be saved
     awaiting_signin: bool = False # paused so the user can sign in through the live view
+    pending_password: str = ""    # a new password proposed for the site; saved to the vault only once the site accepted it

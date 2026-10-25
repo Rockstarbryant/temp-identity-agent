@@ -29,7 +29,7 @@ class TestPasswordGenerator:
 class TestNameGenerator:
     def test_username_format(self):
         username = generate_username()
-        assert "." in username
+        assert username.isalnum()  # no dots: many sites reject them
         assert username == username.lower()
 
 

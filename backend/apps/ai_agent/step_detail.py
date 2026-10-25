@@ -82,6 +82,12 @@ def describe_step(
         text = f"Created identity {result['email']}" if result.get("email") else "Created a temporary identity"
     elif tool_name == "identity.get":
         text = "Checked identity details"
+    elif tool_name == "identity.update_username":
+        text = f"Recorded the username used on the site: {_short(args.get('username', ''))}"
+    elif tool_name == "identity.propose_password":
+        text = "Generated a new password for the site"
+    elif tool_name == "identity.commit_password":
+        text = "Saved the new password to the vault"
     elif tool_name == "email.get_mailbox":
         text = f"Checked mailbox {result['address']}" if result.get("address") else "Checked the temporary mailbox"
     elif tool_name == "email.list_messages":
@@ -154,6 +160,8 @@ def redact_for_storage(
     if isinstance(result, dict):
         if tool_name == "identity.get" and "password" in result:
             result["password"] = HIDDEN
+        if tool_name == "identity.propose_password" and "new_password" in result:
+            result["new_password"] = HIDDEN
         if tool_name == "profile.get" and "values" in result:
             result["values"] = {k: HIDDEN for k in result["values"]}
         if tool_name == "user.ask" and "answer" in result and (args.get("sensitive") or result.get("source") == "saved"):

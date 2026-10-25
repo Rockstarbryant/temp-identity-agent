@@ -81,6 +81,10 @@ class UserAskArgs(BaseModel):
     sensitive: bool = Field(default=False, description="True for IDs or similar; the answer is then not shown in the job timeline.")
 
 
+class UsernameArgs(BaseModel):
+    username: str = Field(..., min_length=3, max_length=40, description="The username you actually used on the site: letters and digits only unless the site allows more.")
+
+
 class AuthMethodsArgs(BaseModel):
     email_password: bool = Field(..., description="True only if the site lets you sign up / log in with an email address and password.")
     methods: list[str] = Field(default_factory=list, description="Everything offered, e.g. ['email_password', 'google', 'facebook'].")
@@ -211,6 +215,48 @@ def _handle_identity_get(ctx: AgentContext, args: NoArgs) -> dict:
     }
 
 
+_USERNAME_OK = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,39}$")
+
+
+def _set_identity_username(ctx: AgentContext, username: str) -> dict:
+    username = username.strip()
+    if not _USERNAME_OK.match(username):
+        raise RegistrationFailedError("A username is 3-40 characters: letters, digits, and . _ - only.")
+    ctx.identity.username = username
+    ctx.identity.save(update_fields=["username", "updated_at"])
+    return {"username": username, "saved_in_vault": True}
+
+
+def _handle_identity_update_username(ctx: AgentContext, args: UsernameArgs) -> dict:
+    if ctx.identity is None:
+        raise RegistrationFailedError("No identity yet. Call identity.create first.")
+    return _set_identity_username(ctx, args.username)
+
+
+def _handle_identity_propose_password(ctx: AgentContext, args: NoArgs) -> dict:
+    if ctx.job.kind != RegistrationJob.Kind.ACCOUNT_TASK or ctx.identity is None:
+        raise RegistrationFailedError("A new password can only be set during a task on an existing account.")
+    from apps.identities.password_generator import generate_password_from_settings
+
+    ctx.pending_password = generate_password_from_settings()
+    return {"new_password": ctx.pending_password,
+            "next": "Type it into the site's new-password fields, submit, check the site accepted it, "
+                    "then call identity.commit_password. If the site refuses it, call this again."}
+
+
+def _handle_identity_commit_password(ctx: AgentContext, args: NoArgs) -> dict:
+    if not ctx.pending_password or ctx.identity is None:
+        raise RegistrationFailedError("There is no proposed password. Call identity.propose_password first.")
+    ctx.identity.set_password(ctx.pending_password)
+    ctx.identity.save(update_fields=["encrypted_password", "updated_at"])
+    ctx.pending_password = ""
+    from apps.audit.models import AuditLog
+
+    AuditLog.objects.create(user=ctx.job.user, action="account.password_changed_by_agent", resource_type="RegistrationJob",
+                            resource_id=str(ctx.job.id))
+    return {"saved_in_vault": True}
+
+
 def _handle_email_get_mailbox(ctx: AgentContext, args: NoArgs) -> dict:
     if ctx.mailbox is None:
         raise RegistrationFailedError("No mailbox provisioned yet — call identity.create first.")
@@ -271,8 +317,29 @@ def _handle_profile_get(ctx: AgentContext, args: ProfileGetArgs) -> dict:
     return {"values": found, "not_saved": missing}
 
 
+_USERNAME_KEYS = ("username", "user_name", "login", "handle", "nickname", "screen_name", "display_name")
+
+
 def _handle_user_ask(ctx: AgentContext, args: UserAskArgs) -> dict:
-    return questions.ask_user(ctx.job, args.question, key=args.field_key, options=args.options, sensitive=args.sensitive)
+    from apps.profiles import standard_fields as sf
+
+    key = sf.normalize_key(args.field_key)
+    is_username = key in _USERNAME_KEYS or key.endswith("_username")
+    permanent = ctx.job.account_mode == RegistrationJob.AccountMode.PERMANENT
+    if is_username and not permanent:
+        raise RegistrationFailedError(
+            "Do not ask the user for a username on a temporary account. Choose one yourself: the identity's username "
+            "with any characters the site rejects removed (letters and digits are always safe), add a few digits if it "
+            "is too short or taken, type it, and call identity.update_username so the vault shows what you used."
+        )
+    out = questions.ask_user(ctx.job, args.question, key=args.field_key, options=args.options, sensitive=args.sensitive)
+    if is_username and permanent and out.get("answered") and ctx.identity is not None:
+        # What the user chose is what the site now has, so the vault must say the same.
+        try:
+            _set_identity_username(ctx, str(out["answer"]))
+        except RegistrationFailedError:
+            pass
+    return out
 
 
 def _handle_site_report_auth_methods(ctx: AgentContext, args: AuthMethodsArgs) -> dict:
@@ -330,6 +397,13 @@ def _handle_registration_mark_complete(ctx: AgentContext, args: NoArgs) -> dict:
         )
     if ctx.job.kind == RegistrationJob.Kind.FORM and not ctx.job.result:
         raise RegistrationFailedError("Call form.complete with the questions and answers you submitted.")
+    if ctx.pending_password:
+        raise RegistrationFailedError(
+            "You proposed a new password but did not save it. If the site accepted it, call identity.commit_password. "
+            "If the password change did not work, call registration.mark_failed."
+        )
+    if ctx.job.kind == RegistrationJob.Kind.REGISTRATION and ctx.identity is not None:
+        _sync_username_from_steps(ctx)
     ctx.job.state = RegistrationJob.State.COMPLETED
     ctx.job.completed_at = timezone.now()
     ctx.job.save(update_fields=["state", "completed_at", "updated_at"])
@@ -343,6 +417,23 @@ def _handle_registration_mark_complete(ctx: AgentContext, args: NoArgs) -> dict:
         )
 
     return {"state": ctx.job.state}
+
+
+def _sync_username_from_steps(ctx: AgentContext) -> None:
+    """Safety net: if the username typed into the sign-up form differs from the identity's (the site rejected
+    the first one and the agent, or the user, picked another), the vault must show the one the site has."""
+    import re
+
+    label_re = re.compile(r"user ?name|user id|login|handle|nickname", re.I)
+    for step in ctx.job.steps.filter(tool_name="browser.type").order_by("-step_index")[:30]:
+        m = re.match(r"Filled “(.*)” with ", step.detail or "")
+        text = str((step.tool_input or {}).get("text", "")).strip()
+        if not m or not text or "@" in text or not label_re.search(m.group(1)) or re.search(r"e-?mail", m.group(1), re.I):
+            continue
+        if text != ctx.identity.username and _USERNAME_OK.match(text):
+            ctx.identity.username = text
+            ctx.identity.save(update_fields=["username", "updated_at"])
+        return
 
 
 def _handle_registration_mark_failed(ctx: AgentContext, args: RegistrationReasonArgs) -> dict:
@@ -447,6 +538,9 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         ToolSpec("data.submit_result", "Save the information you extracted for the requester.", DataResultArgs, _handle_data_submit_result),
         ToolSpec("identity.create", "Generate a new temporary identity and mailbox for this job.", NoArgs, _handle_identity_create),
         ToolSpec("identity.get", "Get the current job's temporary identity, including its password.", NoArgs, _handle_identity_get),
+        ToolSpec("identity.update_username", "Record the username you actually used when the site rejected the identity's one (dots, length, taken). Updates the vault. Never ask the user for a username on a temporary account.", UsernameArgs, _handle_identity_update_username),
+        ToolSpec("identity.propose_password", "Password reset tasks only: generate a new strong password to type into the site's new-password fields. Not saved to the vault until identity.commit_password.", NoArgs, _handle_identity_propose_password),
+        ToolSpec("identity.commit_password", "Password reset tasks only: after the site accepted the new password, save it to the vault.", NoArgs, _handle_identity_commit_password),
         ToolSpec("email.get_mailbox", "Get the current job's temporary mailbox address.", NoArgs, _handle_email_get_mailbox),
         ToolSpec("email.list_messages", "List messages currently in the mailbox.", NoArgs, _handle_email_list_messages),
         ToolSpec("email.read_message", "Read one message's full content by external_id.", EmailReadMessageArgs, _handle_email_read_message),

@@ -371,6 +371,8 @@ export interface EmailConnection {
   imap_host: string | null;
   last_checked_at: string | null;
   last_error: string;
+  /** Muted: no background checks or "new email" notifications for the connected inbox. */
+  muted: boolean;
   gmail_oauth_available: boolean;
   ok?: boolean;
 }
@@ -447,6 +449,10 @@ export async function connectImap(address: string, password: string, host: strin
     method: "PUT",
     body: JSON.stringify({ address, password, host }),
   });
+}
+
+export async function setEmailMuted(muted: boolean) {
+  return request<EmailConnection>("/api/email-connection/", { method: "PATCH", body: JSON.stringify({ muted }) });
 }
 
 export async function testEmailConnection() {
@@ -535,6 +541,8 @@ export interface MailboxInfo {
   own_inbox: boolean;
   expires_at: string | null;
   last_checked_at: string | null;
+  /** Only on the connected inbox. */
+  muted?: boolean;
 }
 
 export interface MailMessageSummary {
@@ -546,6 +554,9 @@ export interface MailMessageSummary {
   read: boolean;
   has_link: boolean;
   has_code: boolean;
+  /** Connected inbox only: the saved account this email is probably about. */
+  site?: string;
+  account_id?: string;
 }
 
 export interface MailMessage extends MailMessageSummary {
@@ -572,6 +583,23 @@ export async function getMailMessage(accountId: string, messageId: string) {
 
 export async function askMailbox(accountId: string, question: string) {
   return request<{ answer: string; checked: number; new: number }>(`/api/accounts/${accountId}/mailbox/ask/`, {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}
+
+// --- Connected inbox (your own Gmail / IMAP, as one inbox) ---------------------------------------
+
+export async function getInbox(refresh = false) {
+  return request<Mailbox>(`/api/inbox/${refresh ? "?refresh=1" : ""}`);
+}
+
+export async function getInboxMessage(messageId: string) {
+  return request<MailMessage>(`/api/inbox/messages/${messageId}/`);
+}
+
+export async function askInbox(question: string) {
+  return request<{ answer: string; checked: number; new: number }>("/api/inbox/ask/", {
     method: "POST",
     body: JSON.stringify({ question }),
   });

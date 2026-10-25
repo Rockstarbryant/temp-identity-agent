@@ -137,7 +137,22 @@ def _announce_new_mail(mailbox: TemporaryEmail, message: EmailMessage) -> None:
     from apps.notifications.service import notify
 
     try:
+        from apps.email_service import inbox
+
+        if inbox.is_muted(mailbox):
+            return
         identity = mailbox.identity
+        if inbox.is_own_inbox(mailbox):
+            # One notification per email in the connected inbox, whichever task's mailbox saw it first.
+            extras = [f"code {message.extracted_otp}"] if message.extracted_otp else []
+            if message.extracted_link:
+                extras.insert(0, "has a link")
+            body = (message.subject or "(no subject)") + (" — " + ", ".join(extras) if extras else "")
+            notify(identity.user, Notification.Kind.MAIL_RECEIVED, f"New email from {_sender_name(message.sender)}", body,
+                   "/mailboxes", {"message_id": str(message.id), "inbox": True, "has_link": bool(message.extracted_link),
+                                  "has_code": bool(message.extracted_otp)},
+                   f"mail:inbox:{identity.user_id}:{__import__('hashlib').sha1(message.external_id.encode()).hexdigest()[:20]}")
+            return
         account = identity.accounts.exclude(status=TemporaryAccount.Status.DELETED).first()
         job = identity.jobs.order_by("-created_at").first()
         if account is not None:
@@ -245,12 +260,15 @@ def poll_user_mailboxes(user, min_age_seconds: int = 25, limit: int = 10) -> int
 
     from django.db.models import Q
 
+    from apps.email_service.inbox import skipped_own_mailbox_ids
+
     cutoff = timezone.now() - timedelta(seconds=min_age_seconds)
     boxes = (
         TemporaryEmail.objects.filter(
             identity__user=user, status=TemporaryEmail.Status.ACTIVE, expires_at__gt=timezone.now()
         )
         .exclude(encrypted_credential="")
+        .exclude(id__in=skipped_own_mailbox_ids())
         .filter(Q(last_polled_at__isnull=True) | Q(last_polled_at__lt=cutoff))
         .select_related("identity")
         .order_by("last_polled_at")[:limit]

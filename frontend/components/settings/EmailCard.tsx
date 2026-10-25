@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Mail, RefreshCw, Unplug } from "lucide-react";
+import { Bell, BellOff, CheckCircle2, Mail, RefreshCw, Unplug } from "lucide-react";
 import {
-  ApiError, EmailConnection, connectImap, disconnectEmail, getGmailAuthorizeUrl, testEmailConnection,
+  ApiError, EmailConnection, connectImap, disconnectEmail, getGmailAuthorizeUrl, setEmailMuted, testEmailConnection,
 } from "@/lib/api";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -25,7 +25,7 @@ export default function EmailCard({ connection, onChange, notice }: Props) {
   const [password, setPassword] = useState("");
   const [host, setHost] = useState("");
   const [showHost, setShowHost] = useState(false);
-  const [busy, setBusy] = useState<"imap" | "gmail" | "test" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"imap" | "gmail" | "test" | "disconnect" | "mute" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -83,6 +83,19 @@ export default function EmailCard({ connection, onChange, notice }: Props) {
     }
   }
 
+  async function toggleMute() {
+    setBusy("mute");
+    setError(null);
+    setInfo(null);
+    try {
+      onChange(await setEmailMuted(!connection.muted));
+    } catch (err) {
+      setError(msg(err, "Could not change the mute setting."));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function disconnect() {
     const ok = await confirm({
       title: "Disconnect your email?",
@@ -107,7 +120,7 @@ export default function EmailCard({ connection, onChange, notice }: Props) {
   return (
     <Section
       title="Your email"
-      hint="Used only for permanent identities, so the agent can read verification codes and links. It only sees messages that arrive after a task starts, never your existing inbox. This is separate from the disposable mailboxes used for temporary identities."
+      hint="Used only for permanent identities, so the agent can read verification codes and links. It only sees messages that arrive after a task starts, never your existing inbox. All of it shows as one inbox in Mailboxes, separate from the disposable mailboxes used for temporary identities."
     >
       {notice && <div className="mb-3"><InlineMessage tone="info">{notice}</InlineMessage></div>}
 
@@ -120,15 +133,25 @@ export default function EmailCard({ connection, onChange, notice }: Props) {
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <Badge tone={connection.last_error ? "danger" : "success"}>{connection.last_error ? "Needs attention" : "Connected"}</Badge>
                 <Badge>{connection.kind === "gmail" ? "Google, read-only" : `IMAP (${connection.imap_host})`}</Badge>
+                {connection.muted && <Badge tone="warning" icon={<BellOff className="h-3 w-3" aria-hidden="true" />}>Muted</Badge>}
               </div>
               {connection.last_checked_at && <p className="mt-1 text-xs text-muted">Last checked {formatDateTime(connection.last_checked_at)}</p>}
             </div>
           </div>
           {connection.last_error && <InlineMessage tone="danger">{connection.last_error}</InlineMessage>}
           {info && <InlineMessage tone="success">{info}</InlineMessage>}
+          {connection.muted && (
+            <InlineMessage tone="info">
+              Muted: no background checks and no new-email notifications for this inbox. The agent still reads it while a permanent task is running.
+            </InlineMessage>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button onClick={test} loading={busy === "test"} disabled={busy !== null}>
               {busy !== "test" && <RefreshCw className="h-4 w-4" aria-hidden="true" />} Test connection
+            </Button>
+            <Button onClick={toggleMute} loading={busy === "mute"} disabled={busy !== null} aria-pressed={connection.muted}>
+              {busy !== "mute" && (connection.muted ? <Bell className="h-4 w-4" aria-hidden="true" /> : <BellOff className="h-4 w-4" aria-hidden="true" />)}
+              {connection.muted ? "Unmute" : "Mute"}
             </Button>
             <Button variant="danger-ghost" onClick={disconnect} loading={busy === "disconnect"} disabled={busy !== null}>
               {busy !== "disconnect" && <Unplug className="h-4 w-4" aria-hidden="true" />} Disconnect

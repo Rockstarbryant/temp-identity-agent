@@ -61,6 +61,12 @@ def answer_question(mailbox: TemporaryEmail, question: str) -> dict:
             pass
 
     messages = list(EmailMessage.objects.filter(mailbox=mailbox).order_by("-received_at", "-created_at")[:MAX_MESSAGES])
+    return answer_from_messages(messages, question, new_count)
+
+
+def answer_from_messages(messages: list[EmailMessage], question: str, new_count: int = 0) -> dict:
+    """Answer `question` from these messages (newest first). No tools: email is untrusted input."""
+    messages = messages[:MAX_MESSAGES]
     if not messages:
         return {"answer": "The mailbox is empty. Nothing has arrived yet.", "checked": 0, "new": new_count}
 

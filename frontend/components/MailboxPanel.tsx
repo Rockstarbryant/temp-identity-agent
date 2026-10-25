@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, ExternalLink, Loader2, Mail, MailOpen, RefreshCw, Send, Sparkles,
+  ArrowLeft, Bell, BellOff, ExternalLink, Loader2, Mail, MailOpen, RefreshCw, Send, Sparkles,
 } from "lucide-react";
-import { ApiError, Mailbox, MailMessage, askMailbox, getMailbox, getMailMessage } from "@/lib/api";
+import {
+  ApiError, Mailbox, MailMessage, askInbox, askMailbox, getInbox, getInboxMessage, getMailbox, getMailMessage, setEmailMuted,
+} from "@/lib/api";
 import { formatDateTime, hostOf, isSafeHttpUrl, timeAgo } from "@/lib/format";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -12,6 +14,31 @@ import CopyButton from "@/components/ui/CopyButton";
 import { inputClass } from "@/components/ui/Field";
 import { InlineMessage } from "@/components/ui/States";
 import { cn } from "@/components/ui/cn";
+
+/** Where a mailbox view gets its data: one vault account's mailbox, or the connected inbox. */
+interface MailSource {
+  key: string;
+  load: (refresh: boolean) => Promise<Mailbox>;
+  message: (id: string) => Promise<MailMessage>;
+  ask: (question: string) => Promise<{ answer: string }>;
+  /** Present for the connected inbox only. */
+  setMuted?: (muted: boolean) => Promise<unknown>;
+}
+
+const accountSource = (accountId: string): MailSource => ({
+  key: `account:${accountId}`,
+  load: (refresh) => getMailbox(accountId, refresh),
+  message: (id) => getMailMessage(accountId, id),
+  ask: (q) => askMailbox(accountId, q),
+});
+
+const inboxSource: MailSource = {
+  key: "inbox",
+  load: (refresh) => getInbox(refresh),
+  message: (id) => getInboxMessage(id),
+  ask: (q) => askInbox(q),
+  setMuted: (m) => setEmailMuted(m),
+};
 
 /** Verification code and link for one message. Shown only when the backend extracted them. */
 function VerificationPanel({ msg }: { msg: MailMessage }) {
@@ -53,8 +80,8 @@ function VerificationPanel({ msg }: { msg: MailMessage }) {
 }
 
 function MessageReader({
-  accountId, id, onRead, onBack,
-}: { accountId: string; id: string; onRead: (id: string) => void; onBack: () => void }) {
+  source, id, onRead, onBack,
+}: { source: MailSource; id: string; onRead: (id: string) => void; onBack: () => void }) {
   const [msg, setMsg] = useState<MailMessage | null>(null);
   const [error, setError] = useState("");
   const onReadRef = useRef(onRead);
@@ -64,7 +91,7 @@ function MessageReader({
     let live = true;
     setMsg(null);
     setError("");
-    getMailMessage(accountId, id)
+    source.message(id)
       .then((m) => {
         if (!live) return;
         setMsg(m);
@@ -74,7 +101,7 @@ function MessageReader({
     return () => {
       live = false;
     };
-  }, [accountId, id]);
+  }, [source, id]);
 
   return (
     <div className="flex min-w-0 flex-col">
@@ -129,7 +156,7 @@ function MessageReader({
 
 const SUGGESTIONS = ["Did the verification email arrive?", "What is the code?", "Summarize what is in here"];
 
-function Assistant({ accountId }: { accountId: string }) {
+function Assistant({ source }: { source: MailSource }) {
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState<{ q: string; a: string; failed?: boolean } | null>(null);
@@ -141,7 +168,7 @@ function Assistant({ accountId }: { accountId: string }) {
     setAsking(true);
     setAnswer(null);
     try {
-      const r = await askMailbox(accountId, text);
+      const r = await source.ask(text);
       setAnswer({ q: text, a: r.answer });
     } catch (e) {
       const msg =
@@ -166,7 +193,7 @@ function Assistant({ accountId }: { accountId: string }) {
         }}
         className="space-y-2 border-t border-line p-3"
       >
-        <label htmlFor={id} className="text-xs text-muted">The assistant reads this mailbox and answers in plain language.</label>
+        <label htmlFor={id} className="text-xs text-muted">The assistant reads {source.setMuted ? "your recent inbox" : "this mailbox"} and answers in plain language.</label>
         <div className="flex gap-2">
           <input
             id={id} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300}
@@ -207,6 +234,17 @@ function Assistant({ accountId }: { accountId: string }) {
  * There is no background polling.
  */
 export default function MailboxPanel({ accountId }: { accountId: string }) {
+  const source = useMemo(() => accountSource(accountId), [accountId]);
+  return <MailboxView source={source} />;
+}
+
+/** Your connected Gmail / IMAP inbox as one inbox: every task's mail in one list, one mute switch. */
+export function InboxPanel() {
+  return <MailboxView source={inboxSource} />;
+}
+
+function MailboxView({ source }: { source: MailSource }) {
+  const [muting, setMuting] = useState(false);
   const [box, setBox] = useState<Mailbox | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -217,26 +255,28 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
   const load = useCallback(async (refresh: boolean) => {
     if (refresh) setRefreshing(true);
     try {
-      setBox(await getMailbox(accountId, refresh));
+      setBox(await source.load(refresh));
       setError(null);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setError({ text: "This account has no mailbox.", retry: false });
+      if (e instanceof ApiError && e.status === 404) {
+        setError({ text: source.setMuted ? "No email is connected. Connect one in Settings." : "This account has no mailbox.", retry: false });
+      }
       else if (e instanceof ApiError && e.status === 410) setError({ text: "This account was deleted, so its mailbox is gone.", retry: false });
       else setError({ text: "Could not load the mailbox.", retry: true });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [accountId]);
+  }, [source]);
 
   useEffect(() => {
-    if (loadedFor.current === accountId) return; // StrictMode runs effects twice in development
-    loadedFor.current = accountId;
+    if (loadedFor.current === source.key) return; // StrictMode runs effects twice in development
+    loadedFor.current = source.key;
     setBox(null);
     setOpenId(null);
     setLoading(true);
     void load(true);
-  }, [accountId, load]);
+  }, [source, load]);
 
   const markReadLocally = useCallback((id: string) => {
     setBox((b) =>
@@ -266,6 +306,21 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
   if (!box) return null;
 
   const closed = box.mailbox.status === "closed";
+  const muted = !!box.mailbox.muted;
+
+  async function toggleMute() {
+    if (!source.setMuted) return;
+    setMuting(true);
+    try {
+      await source.setMuted(!muted);
+      setBox((b) => b && { ...b, mailbox: { ...b.mailbox, muted: !muted } });
+      setError(null);
+    } catch {
+      setError({ text: "Could not change the mute setting.", retry: false });
+    } finally {
+      setMuting(false);
+    }
+  }
 
   return (
     <section className="space-y-4" aria-label="Mailbox">
@@ -279,6 +334,7 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge tone={closed ? "neutral" : "success"}>{closed ? "Closed" : "Active"}</Badge>
             {box.mailbox.own_inbox && <Badge>Your own inbox</Badge>}
+            {muted && <Badge tone="warning" icon={<BellOff className="h-3 w-3" aria-hidden="true" />}>Muted</Badge>}
             {box.unread > 0 && <Badge tone="accent">{box.unread} unread</Badge>}
           </div>
           <p className="text-xs text-muted">
@@ -286,10 +342,25 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
             {box.mailbox.last_checked_at ? <>Last checked {timeAgo(box.mailbox.last_checked_at)}.</> : "Not checked yet."}
           </p>
         </div>
-        <Button size="sm" onClick={() => void load(true)} loading={refreshing} disabled={closed}>
-          {!refreshing && <RefreshCw className="h-4 w-4" aria-hidden="true" />} Check now
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {source.setMuted && (
+            <Button size="sm" onClick={() => void toggleMute()} loading={muting}>
+              {!muting && (muted ? <Bell className="h-4 w-4" aria-hidden="true" /> : <BellOff className="h-4 w-4" aria-hidden="true" />)}
+              {muted ? "Unmute" : "Mute"}
+            </Button>
+          )}
+          <Button size="sm" onClick={() => void load(true)} loading={refreshing} disabled={closed}>
+            {!refreshing && <RefreshCw className="h-4 w-4" aria-hidden="true" />} Check now
+          </Button>
+        </div>
       </div>
+
+      {muted && (
+        <InlineMessage tone="info">
+          Muted: no background checks and no &ldquo;new email&rdquo; notifications for this inbox. The agent still reads it
+          while a task is running, and Check now still works.
+        </InlineMessage>
+      )}
 
       {closed && (
         <InlineMessage tone="info">This mailbox is closed, so new mail cannot arrive. Messages already saved are still shown.</InlineMessage>
@@ -297,14 +368,16 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
       {box.refresh_error && <InlineMessage tone="warning">{box.refresh_error}</InlineMessage>}
       {error && <InlineMessage tone="danger">{error.text}</InlineMessage>}
 
-      <Assistant accountId={accountId} />
+      <Assistant source={source} />
 
       {/* Messages */}
       {box.messages.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center">
           <p className="text-sm font-medium">No messages yet</p>
           <p className="mt-1 text-sm text-muted">
-            {closed ? "Nothing was received before this mailbox closed." : "Verification emails appear here. You will also get a notification when one arrives."}
+            {closed ? "Nothing was received before this mailbox closed."
+              : source.setMuted ? "Mail that arrives after your first permanent-account task appears here."
+              : "Verification emails appear here. You will also get a notification when one arrives."}
           </p>
         </div>
       ) : (
@@ -335,8 +408,9 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
                       </span>
                       <span className="block truncate font-mono text-xs text-muted">{m.sender}</span>
                       <span className="block truncate text-xs text-muted">{m.snippet}</span>
-                      {(m.has_code || m.has_link) && (
-                        <span className="mt-1 flex gap-1">
+                      {(m.has_code || m.has_link || m.site) && (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {m.site && <Badge>{m.site}</Badge>}
                           {m.has_code && <Badge tone="accent">Code</Badge>}
                           {m.has_link && <Badge tone="accent">Link</Badge>}
                         </span>
@@ -350,7 +424,7 @@ export default function MailboxPanel({ accountId }: { accountId: string }) {
 
           <div className={cn("min-w-0 rounded-lg border border-line bg-surface p-4", !openId && "hidden lg:block")}>
             {openId ? (
-              <MessageReader accountId={accountId} id={openId} onRead={markReadLocally} onBack={() => setOpenId(null)} />
+              <MessageReader source={source} id={openId} onRead={markReadLocally} onBack={() => setOpenId(null)} />
             ) : (
               <p className="py-10 text-center text-sm text-muted">Select a message to read it.</p>
             )}
