@@ -184,6 +184,24 @@ if REDIS_URL.startswith("rediss://"):
         "ssl_cert_reqs": ssl.CERT_REQUIRED,
     }
 
+# Managed Redis (Upstash) drops connections it considers idle or that sit behind a NAT.
+# Keep them alive and notice a dead one quickly, so Celery reconnects in seconds instead of
+# discovering the break on its next command.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_keepalive": True,
+    "socket_timeout": 30,
+    "socket_connect_timeout": 15,
+    "health_check_interval": 20,
+    "retry_on_timeout": True,
+}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {"retry_policy": {"timeout": 5.0}}
+CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL = 20
+CELERY_REDIS_SOCKET_KEEPALIVE = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = None  # keep trying; never give up the worker
+# Job state lives in the database, not in Celery results. Not storing results removes a Redis
+# round trip per task (and a failure point: a dropped connection at the end of a task).
+CELERY_TASK_IGNORE_RESULT = True
+
 # Shared cache. The web process and the Celery worker are separate processes, so
 # anything they exchange (live browser frames, API throttle counters) has to live
 # in Redis; the default per-process memory cache can't be shared between them.
@@ -192,9 +210,19 @@ CACHES = {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
         "KEY_PREFIX": "tia",
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            # If Redis is unreachable or over its quota (Upstash free tier = 500k requests a
+            # month), cache calls quietly do nothing instead of crashing the request. Login,
+            # which only touches the cache for throttle counters, keeps working.
+            "IGNORE_EXCEPTIONS": True,
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+        },
     }
 }
+DJANGO_REDIS_IGNORE_EXCEPTIONS = True
+DJANGO_REDIS_LOG_IGNORED_EXCEPTIONS = True
 
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
@@ -204,7 +232,7 @@ CELERY_TASK_TRACK_STARTED = True
 # open for up to this long so the user can finish it from the live view.
 # 0 disables the live hand-off (the job just pauses and Resume starts afresh).
 HUMAN_ASSIST_TIMEOUT_SECONDS = env.int("HUMAN_ASSIST_TIMEOUT_SECONDS", default=300)
-LIVE_VIEW_TICK_SECONDS = env.float("LIVE_VIEW_TICK_SECONDS", default=0.6)
+LIVE_VIEW_TICK_SECONDS = env.float("LIVE_VIEW_TICK_SECONDS", default=1.0)
 # Size of the agent's browser window. The live view scales it to fit the screen.
 BROWSER_VIEWPORT_WIDTH = env.int("BROWSER_VIEWPORT_WIDTH", default=1024)
 BROWSER_VIEWPORT_HEIGHT = env.int("BROWSER_VIEWPORT_HEIGHT", default=768)
@@ -231,7 +259,11 @@ CELERY_BEAT_SCHEDULE = {
     },
     "poll-mailboxes": {
         "task": "apps.email_service.tasks.poll_mailboxes",
-        "schedule": 60.0,  # new mail -> notification
+        # new mail -> notification. Every run costs Redis requests, so the default is 5 minutes
+        # to stay inside Upstash's free monthly quota; lower it with MAILBOX_POLL_SECONDS.
+        "schedule": float(env.int("MAILBOX_POLL_SECONDS", default=300)),
+        # If the worker was down, don't replay a backlog of stale polls when it returns.
+        "options": {"expires": 55},
     },
     "remind-expiring-accounts": {
         "task": "apps.notifications.tasks.remind_expiring_accounts",
