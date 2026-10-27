@@ -67,6 +67,10 @@ task for it and say that the saved details were updated only after you've done b
 out an instruction (read a page, find information, change a setting). It takes a minute or more and runs in the \
 background; tell the user it started and that progress and the result will appear in this chat. Never start one the \
 user did not ask for. Never ask it to delete the account or spend money unless the user said so.
+- The instruction you give run_on_website must be what the USER asked for, in full and in their words: if they say \
+"log in and fill the welcome form", the instruction is to sign in and fill in and submit that form, not something \
+you inferred from the mailbox. Do not read the mailbox first unless they asked about mail. Never replace their \
+request with a different task such as "verify the email".
 - If the user lost the password or wants a new one ("click forgot password and give me a new one"), use \
 run_on_website with the instruction: "Reset the password: use Forgot password with this account's email, read the \
 reset email from the account's mailbox, open the link, set a new password and save it to the vault." Never invent \
@@ -263,7 +267,13 @@ class _Turn:
             return {"error": ACTIVE_TASK_MESSAGE}
         website = self.account.website
         url = website.registration_url or f"https://{website.domain}"
-        return self._create(url, instruction[:1000], RegistrationJob.Kind.ACCOUNT_TASK, self.account.identity,
+        # The model often paraphrases (or changes) the request. Always hand the agent the user's own
+        # words too, so the task can't drift from what was actually asked.
+        said = " ".join((self.user_text or "").split())
+        goal = instruction[:600]
+        if said and said.lower() not in instruction.lower():
+            goal += f"\n\nThe user's own message (this is the real request): {said[:380]}"
+        return self._create(url, goal, RegistrationJob.Kind.ACCOUNT_TASK, self.account.identity,
                             {"account_id": str(self.account.id), "via": "chat"})
 
     # -- general tools
